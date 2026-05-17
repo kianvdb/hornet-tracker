@@ -179,8 +179,7 @@
             </div>
         </div>
     </div>
-    
-    <!-- Modals -->
+
 
     <!-- Modals -->
     <div class="modal" id="arm-modal">
@@ -240,107 +239,22 @@
     <!-- Toast -->
     <div class="toast" id="toast"></div>
 
-    <!-- Externe modules (zie static/js/) — geladen voordat inline script start -->
-   <!-- Externe modules (geladen vóór inline script) -->
+    <!-- ============================================
+         Externe JS modules (zie static/js/)
+         Volgorde:
+           1. utils, map, coord-log, drone-controls, signal-display
+              (definiëren functies op window, geen socket nodig)
+           2. socket-handlers (definieert handlers, gebruikt window.socket)
+           3. modals (gebruikt window.socket)
+           4. main (bootstrap: maakt socket + initialiseert alles)
+         ============================================ -->
     <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
     <script src="{{ url_for('static', filename='js/map.js') }}"></script>
     <script src="{{ url_for('static', filename='js/coord-log.js') }}"></script>
     <script src="{{ url_for('static', filename='js/drone-controls.js') }}"></script>
     <script src="{{ url_for('static', filename='js/signal-display.js') }}"></script>
-
-    <script>
-        const socket = io();
-       window.socket = socket;  // expose voor modules (modals.js, etc.)
-      // Initialiseer kaart bij page-load (fallback locatie Brussel)
-        document.addEventListener('DOMContentLoaded', function() {
-            window.initMap();
-            window.updateLogDisplay();   // toont placeholder
-            document.addEventListener('DOMContentLoaded', function() {
-            window.initMap();
-            window.updateLogDisplay();   // toont placeholder
-            window.registerCommandResultHandler();
-            window.registerBaselineStatusHandler();
-        });
-        });
-    
-       
-
-        // ===== SOCKET EVENTS =====
-        socket.on('connect', function() {
-            document.getElementById('pi-status').textContent = 'ONLINE';
-            document.getElementById('pi-status').className = 'status-value connected';
-            hideModals();
-        });
-        socket.on('disconnect', function() {
-            document.getElementById('pi-status').textContent = 'OFFLINE';
-            document.getElementById('pi-status').className = 'status-value disconnected';
-        });
-      
-        
-        socket.on('status_update', function(data) {
-           // Signal card (LoRa)
-               window.updateSignalCard(data);
-            
-            // Pixhawk
-            const pixEl = document.getElementById('pixhawk-status');
-            pixEl.textContent = data.pixhawk_connected ? 'ONLINE' : 'OFFLINE';
-            pixEl.className = 'status-value ' + (data.pixhawk_connected ? 'connected' : 'disconnected');
-            
-            // GPS
-            const gpsEl = document.getElementById('gps-status');
-            gpsEl.textContent = data.gps_fix ? 'FIX (' + (data.gps_satellites || '?') + ' sats)' : 'GEEN FIX';
-            gpsEl.className = 'status-value ' + (data.gps_fix ? 'connected' : 'disconnected');
-            document.getElementById('map-sats').textContent = data.gps_satellites || '--';
-            
-            // Drone
-            const armedEl = document.getElementById('armed-status');
-            armedEl.textContent = data.armed ? 'ARMED' : 'DISARMED';
-            armedEl.className = 'status-badge ' + (data.armed ? 'armed' : 'disarmed');
-            document.getElementById('flight-mode').textContent = data.flight_mode;
-            updateModeButtons(data.flight_mode);
-            document.getElementById('battery').textContent = data.battery_voltage.toFixed(1) + ' V (' + data.battery_percent + '%)';
-            document.getElementById('altitude').textContent = data.altitude.toFixed(1) + ' m';
-
-            // Map
-           // Update kaart met nieuwe drone positie (no-op zonder fix)
-            window.updateMap(data.gps_lat || 0, data.gps_lon || 0, data.altitude || 0);
-
-            // Battery quick card
-            const batPct = data.battery_percent || 0;
-            document.getElementById('quick-battery-percent').textContent = batPct + '%';
-            document.getElementById('quick-battery-voltage').textContent = (data.battery_voltage || 0).toFixed(2) + ' V';
-            const fill = document.getElementById('battery-fill');
-            fill.style.width = Math.max(0, Math.min(100, batPct)) + '%';
-            fill.classList.remove('low', 'critical');
-            let batLevel = 'good';
-            if (batPct <= 15) { fill.classList.add('critical'); batLevel = 'bad'; }
-            else if (batPct <= 30) { fill.classList.add('low'); batLevel = 'warn'; }
-            else if (batPct <= 50) { batLevel = 'ok'; }
-            if (!data.pixhawk_connected) batLevel = 'bad';
-            setCardStatus('quick-battery', batLevel);
-
-            // WiFi quick card
-            const wifiBars = data.wifi_connected ? rssiToBars(data.wifi_rssi) : 0;
-            updateBars('wifi-bars', wifiBars);
-            document.getElementById('quick-wifi-rssi').textContent = data.wifi_connected ? data.wifi_rssi + ' dBm' : 'N/A';
-            const wifiLab = data.wifi_connected ? rssiLabel(data.wifi_rssi) : { text: 'Geen verbinding', cls: 'label-bad' };
-            const wifiLabelEl = document.getElementById('quick-wifi-label');
-            wifiLabelEl.textContent = wifiLab.text + (data.wifi_connected ? ' · ' + data.wifi_clients + ' client(s)' : '');
-            wifiLabelEl.className = 'quick-sub ' + wifiLab.cls;
-            setCardStatus('quick-wifi', barsToStatusLevel(wifiBars, data.wifi_connected));
-
-            // SiK quick card
-            const telemRssi = Math.min(data.telem_rssi_local || -100, data.telem_rssi_remote || -100);
-            const telemBars = data.telem_connected ? rssiToBars(telemRssi) : 0;
-            updateBars('telem-bars', telemBars);
-            document.getElementById('quick-telem-rssi').textContent = data.telem_connected ? telemRssi.toFixed(0) + ' dBm' : 'N/A';
-            const telemLab = data.telem_connected ? rssiLabel(telemRssi) : { text: 'Geen data', cls: 'label-bad' };
-            const telemLabelEl = document.getElementById('quick-telem-label');
-            telemLabelEl.textContent = telemLab.text;
-            telemLabelEl.className = 'quick-sub ' + telemLab.cls;
-            setCardStatus('quick-telem', barsToStatusLevel(telemBars, data.telem_connected));
-        });
-    </script>
+    <script src="{{ url_for('static', filename='js/socket-handlers.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modals.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
