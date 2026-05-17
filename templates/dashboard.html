@@ -181,6 +181,24 @@
     </div>
     
     <!-- Modals -->
+
+    <!-- Modals -->
+    <div class="modal" id="arm-modal">
+        <div class="modal-content">
+            <h3>⚠️ Drone armen?</h3>
+            <p>De propellers gaan draaien. Zorg dat:</p>
+            <ul style="text-align:left; color:#aaa; margin: 0 auto 20px auto; max-width: 280px; padding-left: 20px;">
+                <li>Props vrij zijn</li>
+                <li>Iedereen op afstand staat</li>
+                <li>Batterij goed zit</li>
+            </ul>
+            <div class="btn-group" style="justify-content: center;">
+                <button class="btn btn-secondary" onclick="hideModals()">Annuleren</button>
+                <button class="btn btn-danger" onclick="confirmArm()">ARMEN</button>
+            </div>
+        </div>
+    </div>
+
     <div class="modal" id="shutdown-modal">
         <div class="modal-content">
             <h3>⏻ Pi Afsluiten</h3>
@@ -227,6 +245,8 @@
     <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
     <script src="{{ url_for('static', filename='js/map.js') }}"></script>
     <script src="{{ url_for('static', filename='js/coord-log.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/drone-controls.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/signal-display.js') }}"></script>
 
     <script>
         const socket = io();
@@ -235,69 +255,15 @@
         document.addEventListener('DOMContentLoaded', function() {
             window.initMap();
             window.updateLogDisplay();   // toont placeholder
+            document.addEventListener('DOMContentLoaded', function() {
+            window.initMap();
+            window.updateLogDisplay();   // toont placeholder
+            window.registerCommandResultHandler();
+            window.registerBaselineStatusHandler();
         });
-        // ===== MODALS =====
-        function resetBaseline() {
-            const btn = document.getElementById('reset-baseline-btn');
-            btn.disabled = true; btn.textContent = 'Meten...';
-            socket.emit('reset_baseline');
-        }
- 
-        // ===== DRONE CONTROLS =====
-        function armDrone() {
-            if (!confirm('⚠️ ARMEN? Propellers gaan draaien!\n\nZorg dat:\n- Props vrij zijn\n- Iedereen op afstand staat\n- Batterij goed zit')) return;
-            document.getElementById('command-feedback').textContent = '⏳ ARM commando versturen...';
-            document.getElementById('command-feedback').style.color = '#f5a623';
-            socket.emit('arm_drone');
-        }
-
-        function disarmDrone() {
-            document.getElementById('command-feedback').textContent = '⏳ DISARM commando versturen...';
-            document.getElementById('command-feedback').style.color = '#f5a623';
-            socket.emit('disarm_drone');
-        }
-
-        function setMode(modeId) {
-            const modeNames = {0:'STABILIZE',2:'ALT_HOLD',4:'GUIDED',5:'LOITER',6:'RTL',9:'LAND'};
-            const name = modeNames[modeId] || 'MODE_'+modeId;
-            document.getElementById('command-feedback').textContent = '⏳ Mode → ' + name + '...';
-            document.getElementById('command-feedback').style.color = '#f5a623';
-            socket.emit('set_mode', {mode: modeId});
-        }
-
-        function updateModeButtons(currentMode) {
-            const modeMap = {'STABILIZE':0,'ALT_HOLD':2,'GUIDED':4,'LOITER':5,'RTL':6,'LAND':9};
-            document.querySelectorAll('.mode-btn').forEach(btn => {
-                btn.style.borderColor = '#0f3460';
-                btn.style.color = '#eee';
-            });
-            // Highlight active mode
-            const modeId = modeMap[currentMode];
-            if (modeId !== undefined) {
-                const btns = document.querySelectorAll('.mode-btn');
-                btns.forEach(btn => {
-                    if (btn.textContent === currentMode) {
-                        btn.style.borderColor = '#4ade80';
-                        btn.style.color = '#4ade80';
-                    }
-                });
-            }
-        }
-
-        socket.on('command_result', function(data) {
-            const fb = document.getElementById('command-feedback');
-            if (data.success) {
-                fb.textContent = '✅ ' + data.message;
-                fb.style.color = '#4ade80';
-            } else {
-                fb.textContent = '❌ ' + data.message;
-                fb.style.color = '#f87171';
-            }
-            setTimeout(() => {
-                fb.textContent = 'Klaar voor commando\'s';
-                fb.style.color = '#aaa';
-            }, 4000);
         });
+    
+       
 
         // ===== SOCKET EVENTS =====
         socket.on('connect', function() {
@@ -309,29 +275,11 @@
             document.getElementById('pi-status').textContent = 'OFFLINE';
             document.getElementById('pi-status').className = 'status-value disconnected';
         });
-        socket.on('baseline_status', function(data) {
-            const btn = document.getElementById('reset-baseline-btn');
-            btn.disabled = data.measuring;
-            btn.textContent = data.measuring ? 'Meten...' : 'Reset';
-        });
+      
         
         socket.on('status_update', function(data) {
-            // Signal
-            document.getElementById('signal-power').textContent = data.signal_power.toFixed(1) + ' dB';
-            document.getElementById('signal-baseline').textContent = data.baseline.toFixed(1) + ' dB';
-            document.getElementById('signal-delta').textContent = (data.signal_delta >= 0 ? '+' : '') + data.signal_delta.toFixed(1) + ' dB';
-            const barWidth = Math.min(100, Math.max(0, (data.signal_delta + 10) * 3));
-            document.getElementById('signal-bar').style.width = barWidth + '%';
-            const detectedEl = document.getElementById('signal-detected');
-            if (data.signal_detected) {
-                detectedEl.textContent = '>>> SIGNAAL <<<';
-                detectedEl.className = 'status-value signal-detected';
-                document.getElementById('signal-delta').style.color = '#4ade80';
-            } else {
-                detectedEl.textContent = 'Geen signaal';
-                detectedEl.className = 'status-value';
-                document.getElementById('signal-delta').style.color = '#aaa';
-            }
+           // Signal card (LoRa)
+               window.updateSignalCard(data);
             
             // Pixhawk
             const pixEl = document.getElementById('pixhawk-status');
