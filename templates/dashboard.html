@@ -153,7 +153,8 @@
     <div class="map-section">
         <div class="map-card">
             <h2>🗺️ Live Positie</h2>
-            <div id="map"></div>
+            <div id="gps-waiting-badge">⏳ Wachten op GPS fix...</div>
+                <div id="map"></div>
             <div class="map-info">
                 <div>Lat: <span id="map-lat">--</span></div>
                 <div>Lon: <span id="map-lon">--</span></div>
@@ -222,207 +223,19 @@
     <div class="toast" id="toast"></div>
 
     <!-- Externe modules (zie static/js/) — geladen voordat inline script start -->
+   <!-- Externe modules (geladen vóór inline script) -->
     <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/map.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/coord-log.js') }}"></script>
 
     <script>
         const socket = io();
        window.socket = socket;  // expose voor modules (modals.js, etc.)
-        let coordLog = [];
-        let map, droneMarker, trailLine;
-        let trailCoords = [];
-        let showTrail = true;
-        let mapInitialized = false;
-
-        // ===== MAP INITIALIZATION =====
-        function initMap(lat, lon) {
-            if (mapInitialized) return;
-            map = L.map('map', {
-                center: [lat, lon],
-                zoom: 18,
-                zoomControl: true
-            });
-            
-            // Kaartlagen
-            const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap',
-                maxZoom: 22
-            });
-
-            const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: '© Esri',
-                maxZoom: 22
-            });
-
-            const hybridLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
-                maxZoom: 22
-            });
-
-            // Start met satelliet + straatnamen overlay
-            satelliteLayer.addTo(map);
-            hybridLayer.addTo(map);
-
-            // Layer control
-            const baseMaps = {
-                "🛰️ Satelliet": satelliteLayer,
-                "🗺️ Stratenplan": osmLayer
-            };
-            const overlays = {
-                "Straatnamen": hybridLayer
-            };
-            L.control.layers(baseMaps, overlays, { position: 'topright' }).addTo(map);
-
-            // Drone icon
-            const droneIcon = L.divIcon({
-                html: '<div style="font-size:28px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">🚁</div>',
-                className: '',
-                iconSize: [28, 28],
-                iconAnchor: [14, 14]
-            });
-
-            droneMarker = L.marker([lat, lon], { icon: droneIcon }).addTo(map);
-            trailLine = L.polyline([], { color: '#f5a623', weight: 3, opacity: 0.7 }).addTo(map);
-            
-            mapInitialized = true;
-        }
-
-        function updateMap(lat, lon, alt) {
-            if (lat === 0 && lon === 0) return;
-            
-            if (!mapInitialized) {
-                initMap(lat, lon);
-            }
-
-            droneMarker.setLatLng([lat, lon]);
-            
-            if (showTrail) {
-                trailCoords.push([lat, lon]);
-                if (trailCoords.length > 1000) trailCoords.shift();
-                trailLine.setLatLngs(trailCoords);
-            }
-
-            document.getElementById('map-lat').textContent = lat.toFixed(7);
-            document.getElementById('map-lon').textContent = lon.toFixed(7);
-            document.getElementById('map-alt').textContent = alt.toFixed(1);
-        }
-
-        function centerMap() {
-            if (mapInitialized && droneMarker) {
-                map.setView(droneMarker.getLatLng(), map.getZoom());
-            }
-        }
-
-        function toggleTrail() {
-            showTrail = !showTrail;
-            if (!showTrail) {
-                trailCoords = [];
-                if (trailLine) trailLine.setLatLngs([]);
-            }
-            showToast(showTrail ? 'Trail ingeschakeld' : 'Trail uitgeschakeld');
-        }
-
-        // ===== COORDINATE LOGGER =====
-        function logCoordinate() {
-            const lat = parseFloat(document.getElementById('map-lat').textContent);
-            const lon = parseFloat(document.getElementById('map-lon').textContent);
-            const alt = parseFloat(document.getElementById('map-alt').textContent);
-            
-            if (isNaN(lat) || isNaN(lon) || (lat === 0 && lon === 0)) {
-                showToast('Geen GPS positie beschikbaar');
-                return;
-            }
-
-            const now = new Date();
-            const time = now.toLocaleTimeString('nl-BE', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-            const entry = { lat, lon, alt, time, date: now.toISOString() };
-            coordLog.push(entry);
-
-            // Pin op kaart
-            const pinIcon = L.divIcon({
-                html: `<div style="font-size:18px;">📌</div>`,
-                className: '',
-                iconSize: [18, 18],
-                iconAnchor: [9, 18]
-            });
-            const marker = L.marker([lat, lon], { icon: pinIcon }).addTo(map);
-            marker.bindPopup(`<b>#${coordLog.length}</b><br>${lat.toFixed(7)}, ${lon.toFixed(7)}<br>Alt: ${alt.toFixed(1)}m<br>${time}`);
-
-            updateLogDisplay();
-            showToast(`📌 Positie #${coordLog.length} gelogd`);
-        }
-
-        function updateLogDisplay() {
-            const container = document.getElementById('coord-log');
-            document.getElementById('log-count').textContent = coordLog.length + ' punten';
-            
-            if (coordLog.length === 0) {
-                container.innerHTML = '<div class="coord-empty">Klik "📌 Log Positie" om coördinaten op te slaan</div>';
-                return;
-            }
-
-            let html = '';
-            for (let i = coordLog.length - 1; i >= 0; i--) {
-                const e = coordLog[i];
-                const gmapsUrl = `https://www.google.com/maps?q=${e.lat},${e.lon}`;
-                html += `
-                <div class="coord-entry">
-                    <span class="coord-time">#${i+1} ${e.time}</span>
-                    <span class="coord-value" onclick="copyCoord(${i})" title="Klik om te kopiëren">${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}</span>
-                    <span class="coord-alt">${e.alt.toFixed(1)}m</span>
-                    <div class="coord-actions">
-                        <button class="coord-btn" onclick="copyCoord(${i})" title="Kopieer">📋</button>
-                        <a class="coord-btn" href="${gmapsUrl}" target="_blank" title="Open in Google Maps">🗺️</a>
-                    </div>
-                </div>`;
-            }
-            container.innerHTML = html;
-        }
-
-        function copyCoord(index) {
-            const e = coordLog[index];
-            const text = `${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}`;
-            navigator.clipboard.writeText(text).then(() => {
-                showToast(`📋 Gekopieerd: ${text}`);
-            }).catch(() => {
-                // Fallback
-                const ta = document.createElement('textarea');
-                ta.value = text;
-                document.body.appendChild(ta);
-                ta.select();
-                document.execCommand('copy');
-                document.body.removeChild(ta);
-                showToast(`📋 Gekopieerd: ${text}`);
-            });
-        }
-
-        function clearLog() {
-            if (coordLog.length === 0) return;
-            if (confirm('Alle gelogde coördinaten wissen?')) {
-                coordLog = [];
-                updateLogDisplay();
-                showToast('Log gewist');
-            }
-        }
-
-        function exportLog() {
-            if (coordLog.length === 0) {
-                showToast('Geen data om te exporteren');
-                return;
-            }
-            let csv = 'nr,tijd,datum,latitude,longitude,altitude_m,google_maps_link\n';
-            coordLog.forEach((e, i) => {
-                csv += `${i+1},${e.time},${e.date},${e.lat.toFixed(7)},${e.lon.toFixed(7)},${e.alt.toFixed(1)},https://www.google.com/maps?q=${e.lat},${e.lon}\n`;
-            });
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `hornet_tracker_log_${new Date().toISOString().slice(0,10)}.csv`;
-            a.click();
-            URL.revokeObjectURL(url);
-            showToast('CSV geëxporteerd');
-        }
-
- 
+      // Initialiseer kaart bij page-load (fallback locatie Brussel)
+        document.addEventListener('DOMContentLoaded', function() {
+            window.initMap();
+            window.updateLogDisplay();   // toont placeholder
+        });
         // ===== MODALS =====
         function resetBaseline() {
             const btn = document.getElementById('reset-baseline-btn');
@@ -541,9 +354,8 @@
             document.getElementById('altitude').textContent = data.altitude.toFixed(1) + ' m';
 
             // Map
-            if (data.gps_lat && data.gps_lon && !(data.gps_lat === 0 && data.gps_lon === 0)) {
-                updateMap(data.gps_lat, data.gps_lon, data.altitude || 0);
-            }
+           // Update kaart met nieuwe drone positie (no-op zonder fix)
+            window.updateMap(data.gps_lat || 0, data.gps_lon || 0, data.altitude || 0);
 
             // Battery quick card
             const batPct = data.battery_percent || 0;

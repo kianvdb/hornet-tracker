@@ -57,3 +57,30 @@
     color: #eee;
     font-weight: bold;
 }
+
+/* ============================================
+   GPS WAITING BADGE — overlay op kaart zolang
+   er geen GPS-fix is. Verdwijnt bij eerste fix.
+   ============================================ */
+
+/* Container moet relative zijn voor absolute badge */
+.map-card {
+    position: relative;
+}
+
+#gps-waiting-badge {
+    position: absolute;
+    top: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(22, 33, 62, 0.95);
+    border: 1px solid #f5a623;
+    color: #f5a623;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: bold;
+    z-index: 1000;
+    pointer-events: none;       /* klik gaat door naar kaart */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    animation: pulse 2s infinite;
+}
