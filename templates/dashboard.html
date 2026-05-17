@@ -220,10 +220,13 @@
 
     <!-- Toast -->
     <div class="toast" id="toast"></div>
-    
+
+    <!-- Externe modules (zie static/js/) — geladen voordat inline script start -->
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+
     <script>
         const socket = io();
-        let countdownInterval = null;
+       window.socket = socket;  // expose voor modules (modals.js, etc.)
         let coordLog = [];
         let map, droneMarker, trailLine;
         let trailCoords = [];
@@ -419,92 +422,14 @@
             showToast('CSV geëxporteerd');
         }
 
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.textContent = msg;
-            toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 2500);
-        }
-
-        // ===== HELPERS =====
-        function rssiToBars(rssi) {
-            if (rssi >= -50) return 4;
-            if (rssi >= -65) return 3;
-            if (rssi >= -75) return 2;
-            if (rssi >= -90) return 1;
-            return 0;
-        }
-
-        function rssiLabel(rssi) {
-            if (rssi >= -50) return { text: 'Uitstekend', cls: 'label-good' };
-            if (rssi >= -65) return { text: 'Goed', cls: 'label-good' };
-            if (rssi >= -75) return { text: 'Redelijk', cls: 'label-ok' };
-            if (rssi >= -90) return { text: 'Zwak', cls: 'label-warn' };
-            return { text: 'Geen signaal', cls: 'label-bad' };
-        }
-
-        function updateBars(elementId, bars) {
-            document.getElementById(elementId).className = 'signal-bars bars-' + bars;
-        }
-
-        function setCardStatus(cardId, level) {
-            const card = document.getElementById(cardId);
-            card.classList.remove('status-good', 'status-ok', 'status-warn', 'status-bad');
-            card.classList.add('status-' + level);
-        }
-
-        function barsToStatusLevel(bars, connected) {
-            if (!connected || bars === 0) return 'bad';
-            if (bars === 1) return 'warn';
-            if (bars === 2) return 'ok';
-            return 'good';
-        }
-
+ 
         // ===== MODALS =====
         function resetBaseline() {
             const btn = document.getElementById('reset-baseline-btn');
             btn.disabled = true; btn.textContent = 'Meten...';
             socket.emit('reset_baseline');
         }
-        function showShutdownModal() { document.getElementById('shutdown-modal').classList.add('show'); }
-        function showRebootModal() { document.getElementById('reboot-modal').classList.add('show'); }
-        function hideModals() {
-            ['shutdown-modal','reboot-modal','countdown-modal','success-modal'].forEach(id =>
-                document.getElementById(id).classList.remove('show'));
-            if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
-        }
-        function startCountdown(seconds, onComplete) {
-            let remaining = seconds;
-            const numEl = document.getElementById('countdown-number');
-            const msgEl = document.getElementById('countdown-message');
-            document.getElementById('countdown-modal').classList.add('show');
-            function tick() {
-                numEl.textContent = remaining;
-                msgEl.textContent = `Wacht ${remaining} seconden...`;
-                if (remaining <= 0) { clearInterval(countdownInterval); countdownInterval = null; onComplete(); }
-                remaining--;
-            }
-            tick();
-            countdownInterval = setInterval(tick, 1000);
-        }
-        function doShutdown() {
-            hideModals();
-            document.getElementById('countdown-title').textContent = '⏻ Afsluiten...';
-            socket.emit('shutdown');
-            startCountdown(10, () => {
-                document.getElementById('countdown-modal').classList.remove('show');
-                document.getElementById('success-modal').classList.add('show');
-            });
-        }
-        function doReboot() {
-            hideModals();
-            document.getElementById('countdown-title').textContent = '🔄 Herstarten...';
-            document.getElementById('countdown-modal').classList.add('show');
-            document.getElementById('countdown-number').textContent = '...';
-            document.getElementById('countdown-message').textContent = 'Dashboard is over 1-2 minuten weer beschikbaar.';
-            socket.emit('reboot');
-        }
-
+ 
         // ===== DRONE CONTROLS =====
         function armDrone() {
             if (!confirm('⚠️ ARMEN? Propellers gaan draaien!\n\nZorg dat:\n- Props vrij zijn\n- Iedereen op afstand staat\n- Batterij goed zit')) return;
@@ -656,5 +581,6 @@
             setCardStatus('quick-telem', barsToStatusLevel(telemBars, data.telem_connected));
         });
     </script>
+    <script src="{{ url_for('static', filename='js/modals.js') }}"></script>
 </body>
 </html>
