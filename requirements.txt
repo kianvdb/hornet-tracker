@@ -1,0 +1,5 @@
+flask
+flask-socketio
+pymavlink
+pyrtlsdr
+numpy
