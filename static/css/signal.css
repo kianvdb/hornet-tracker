@@ -1,0 +1,36 @@
+/* ============================================
+   SIGNAL — LoRa signaal card (delta, bar, detectie)
+   ============================================ */
+
+/* Het grote +X.X dB getal in het midden van de signal-card */
+.big-number {
+    font-size: 2.5em;
+    text-align: center;
+    color: #4ade80;
+    margin: 10px 0;
+}
+
+/* Container voor de signal-bar (achtergrond) */
+.signal-bar-container {
+    width: 100%;
+    height: 30px;
+    background: #0f3460;
+    border-radius: 5px;
+    margin: 10px 0;
+    overflow: hidden;
+}
+
+/* De gevulde bar zelf, gradient van groen naar rood */
+.signal-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #4ade80, #f5a623, #f87171);
+    transition: width 0.3s ease;
+    border-radius: 5px;
+}
+
+/* Knipperende tekst bij actieve detectie */
+.signal-detected {
+    color: #4ade80;
+    font-weight: bold;
+    animation: pulse 1s infinite;
+}

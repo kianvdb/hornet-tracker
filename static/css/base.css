@@ -1,0 +1,49 @@
+/* ============================================
+   BASE — globale reset, body, headings, animaties
+   en gedeelde label-kleuren
+   ============================================ */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    min-height: 100vh;
+    padding: 20px;
+}
+
+h1 {
+    text-align: center;
+    color: #f5a623;
+    margin-bottom: 20px;
+}
+
+/* Gedeelde status-kleuren (gebruikt door cards, navbar, signal, etc.) */
+.label-good { color: #4ade80; }
+.label-ok   { color: #f5a623; }
+.label-warn { color: #fb923c; }
+.label-bad  { color: #f87171; }
+
+.connected    { color: #4ade80; }
+.disconnected { color: #f87171; }
+
+/* Pulse animatie voor knipperende elementen (signal detected, alarm borders) */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.5; }
+}
+
+/* ============================================
+   RESPONSIVE — mobile / smalle schermen
+   ============================================ */
+@media (max-width: 900px) {
+    .quick-status   { grid-template-columns: 1fr; }
+    .quick-big      { font-size: 1.8em; }
+    .map-section    { grid-template-columns: 1fr; }
+    #map            { height: 300px; }
+}

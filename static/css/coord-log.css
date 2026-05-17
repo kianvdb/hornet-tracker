@@ -1,0 +1,137 @@
+/* ============================================
+   COORD-LOG — gelogde coordinaten lijst + toast
+   ============================================ */
+
+/* Scrollbare container voor logged entries */
+.coord-log {
+    max-height: 400px;
+    overflow-y: auto;
+    margin-top: 10px;
+}
+
+/* Custom scrollbar (webkit only — Firefox toont default) */
+.coord-log::-webkit-scrollbar {
+    width: 6px;
+}
+
+.coord-log::-webkit-scrollbar-track {
+    background: #0f3460;
+    border-radius: 3px;
+}
+
+.coord-log::-webkit-scrollbar-thumb {
+    background: #f5a623;
+    border-radius: 3px;
+}
+
+/* Eén gelogde entry (tijd, coords, alt, knoppen) */
+.coord-entry {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    border-bottom: 1px solid #0f3460;
+    font-size: 0.85em;
+    transition: background 0.2s;
+}
+
+.coord-entry:hover {
+    background: #0f3460;
+}
+
+.coord-entry .coord-time {
+    color: #aaa;
+    font-size: 0.8em;
+    min-width: 55px;
+}
+
+.coord-entry .coord-value {
+    color: #4ade80;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 0.85em;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: #0f3460;
+    transition: text-decoration-color 0.2s;
+}
+
+.coord-entry .coord-value:hover {
+    text-decoration-color: #4ade80;
+}
+
+.coord-entry .coord-alt {
+    color: #aaa;
+    font-size: 0.8em;
+    min-width: 50px;
+    text-align: right;
+}
+
+.coord-entry .coord-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.coord-entry .coord-btn {
+    background: none;
+    border: 1px solid #0f3460;
+    color: #aaa;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.8em;
+    transition: all 0.2s;
+}
+
+.coord-entry .coord-btn:hover {
+    border-color: #f5a623;
+    color: #f5a623;
+}
+
+.coord-entry .coord-btn.copied {
+    border-color: #4ade80;
+    color: #4ade80;
+}
+
+/* Header boven de log-lijst (telling + wis-knop) */
+.log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.log-count {
+    color: #aaa;
+    font-size: 0.85em;
+}
+
+/* Placeholder als log leeg is */
+.coord-empty {
+    color: #666;
+    text-align: center;
+    padding: 40px 20px;
+    font-style: italic;
+}
+
+/* --- Toast notification (rechtsonder, voor copy/log feedback) --- */
+.toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #16213e;
+    border: 1px solid #4ade80;
+    color: #4ade80;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 0.9em;
+    z-index: 9999;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.3s;
+    pointer-events: none;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
