@@ -91,13 +91,13 @@ function dispatchStatusUpdate(data) {
     updateTelemQuickCard(data);
 }
 
-// ============================================
-// CARD UPDATE HELPERS (verdwijnen grotendeels in Doel 1)
-// ============================================
-
-
 /**
- * Update de "Drone Status" card: armed badge, mode, batterij, hoogte.
+ * Update de armed-status badge in de Besturing card.
+ *
+ * Was vroeger onderdeel van de Drone Status card (commit 7 weggehaald).
+ * Flight mode, batterij en hoogte worden niet meer in een card getoond —
+ * die info zit in de navbar (batterij/hoogte) of in de Besturing-knoppen
+ * highlight (flight mode).
  */
 function updateDroneStatusCard(data) {
     const armedEl = document.getElementById('armed-status');
@@ -105,17 +105,7 @@ function updateDroneStatusCard(data) {
         armedEl.textContent = data.armed ? 'ARMED' : 'DISARMED';
         armedEl.className   = 'status-badge ' + (data.armed ? 'armed' : 'disarmed');
     }
-
-    const modeEl = document.getElementById('flight-mode');
-    if (modeEl) modeEl.textContent = data.flight_mode;
-
-    const batEl = document.getElementById('battery');
-    if (batEl) batEl.textContent = data.battery_voltage.toFixed(1) + ' V (' + data.battery_percent + '%)';
-
-    const altEl = document.getElementById('altitude');
-    if (altEl) altEl.textContent = data.altitude.toFixed(1) + ' m';
 }
-
 /**
  * Update de bovenste batterij quick-card.
  *

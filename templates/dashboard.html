@@ -200,29 +200,15 @@
             </div>
         </div>
         
-        <div class="card">
-            <h2>🚁 Drone Status</h2>
-            <div class="status-row">
-                <span class="status-label">Status</span>
-                <span id="armed-status" class="status-badge disarmed">DISARMED</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Flight Mode</span>
-                <span class="status-value" id="flight-mode">--</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Batterij</span>
-                <span class="status-value" id="battery">-- V</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Hoogte</span>
-                <span class="status-value" id="altitude">-- m</span>
-            </div>
-        </div>
+       
 
         <!-- DRONE CONTROLS -->
         <div class="card">
             <h2>🎮 Besturing</h2>
+             <!-- Armed status indicator (was vroeger in Drone Status card) -->
+            <div style="text-align:center; margin-bottom:15px;">
+                <span id="armed-status" class="status-badge disarmed">DISARMED</span>
+            </div>
             
             <div style="display:flex;gap:10px;margin-bottom:15px;">
                 <button class="btn btn-success" id="btn-arm" onclick="armDrone()" style="flex:1;padding:12px;font-size:1.1em;">
