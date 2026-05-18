@@ -31,6 +31,9 @@
  *  - window.hideModals()         modals.js (gebruikt bij socket reconnect)
  */
 
+
+
+
 /**
  * Registreer connect, disconnect, en status_update.
  * Wordt aangeroepen vanuit main.js direct na socket creatie.
@@ -41,28 +44,16 @@ function registerCoreSocketHandlers() {
     // CONNECT — Pi online
     // ============================================
     window.socket.on('connect', function() {
-        // Pi-status veld in oude verbindingen-card (verdwijnt in Doel 1)
-        const piEl = document.getElementById('pi-status');
-        if (piEl) {
-            piEl.textContent = 'ONLINE';
-            piEl.className   = 'status-value connected';
-        }
-        // Sluit eventueel openstaande shutdown/reboot modals
-        // (als socket reconnect na reboot, modal mag weg)
+        // Pi is online — eventuele openstaande modals sluiten (na reboot reconnect)
         window.hideModals();
     });
 
-    // ============================================
-    // DISCONNECT — Pi offline
-    // ============================================
     window.socket.on('disconnect', function() {
-        const piEl = document.getElementById('pi-status');
-        if (piEl) {
-            piEl.textContent = 'OFFLINE';
-            piEl.className   = 'status-value disconnected';
-        }
+        // Pi offline gedetecteerd door browser. Wordt momenteel niet visueel
+        // getoond (was vroeger #pi-status in de Verbindingen card).
+        // In een volgende commit komt dit terug als status in de navbar.
+        console.warn('[socket] Pi connection lost');
     });
-
     // ============================================
     // STATUS_UPDATE — dispatcher
     // ============================================
@@ -80,10 +71,7 @@ function dispatchStatusUpdate(data) {
     // --- LoRa signal card ---
     window.updateSignalCard(data);
 
-    // --- Verbindingen card (Pixhawk + GPS) ---
-    // Deze velden verdwijnen in Doel 1 (navbar refactor). Voor nu
-    // updaten we ze inline zodat huidige UI blijft werken.
-    updateConnectionsCard(data);
+   
 
     // --- Map (drone positie + trail) ---
     window.updateMap(data.gps_lat || 0, data.gps_lon || 0, data.altitude || 0);
@@ -107,29 +95,6 @@ function dispatchStatusUpdate(data) {
 // CARD UPDATE HELPERS (verdwijnen grotendeels in Doel 1)
 // ============================================
 
-/**
- * Update de "Verbindingen" card: Pixhawk online/offline, GPS fix status,
- * en het sats-veld onder de map.
- */
-function updateConnectionsCard(data) {
-    const pixEl = document.getElementById('pixhawk-status');
-    if (pixEl) {
-        pixEl.textContent = data.pixhawk_connected ? 'ONLINE' : 'OFFLINE';
-        pixEl.className   = 'status-value ' + (data.pixhawk_connected ? 'connected' : 'disconnected');
-    }
-
-    const gpsEl = document.getElementById('gps-status');
-    if (gpsEl) {
-        gpsEl.textContent = data.gps_fix
-            ? 'FIX (' + (data.gps_satellites || '?') + ' sats)'
-            : 'GEEN FIX';
-        gpsEl.className = 'status-value ' + (data.gps_fix ? 'connected' : 'disconnected');
-    }
-
-    // Sats veld onder de kaart (blijft mogelijk staan in Doel 1)
-    const satsEl = document.getElementById('map-sats');
-    if (satsEl) satsEl.textContent = data.gps_satellites || '--';
-}
 
 /**
  * Update de "Drone Status" card: armed badge, mode, batterij, hoogte.
@@ -278,6 +243,8 @@ window.updateBars('nav-wifi-bars', bars);
  * Popover toont volledige details inclusief lat/lon.
  */
 function updateGpsNavbar(data) {
+     const satsEl = document.getElementById('map-sats');
+    if (satsEl) satsEl.textContent = data.gps_satellites || '--';
     const navStatus = document.getElementById('nav-gps-status');
     const navAlt    = document.getElementById('nav-gps-altitude');
     const navItem   = document.getElementById('nav-gps');
