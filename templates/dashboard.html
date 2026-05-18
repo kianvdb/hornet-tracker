@@ -89,6 +89,44 @@
                     </div>
                 </div>
             </div>
+            <!-- GPS FIX + HOOGTE -->
+            <div class="navbar-item" id="nav-gps" onclick="toggleNavPopover('gps-popover')">
+                <span class="navbar-item-icon">🛰️</span>
+                <span class="navbar-item-value" id="nav-gps-status">Geen fix</span>
+                <span class="navbar-item-sub" id="nav-gps-altitude"></span>
+
+                <div class="navbar-popover" id="gps-popover">
+                    <div class="popover-title">GPS &amp; positie</div>
+                    <div class="popover-row">
+                        <span>Pixhawk</span>
+                        <span id="pop-gps-pixhawk">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Fix status</span>
+                        <span id="pop-gps-fix">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Satellieten</span>
+                        <span id="pop-gps-sats">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Latitude</span>
+                        <span id="pop-gps-lat">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Longitude</span>
+                        <span id="pop-gps-lon">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Hoogte</span>
+                        <span id="pop-gps-alt">--</span>
+                    </div>
+                    <div class="popover-hint">
+                        u-blox GPS via Pixhawk. Minimaal 6 satellieten en
+                        fix-type 3D voor betrouwbare positie.
+                    </div>
+                </div>
+            </div>
 
         </div>
 

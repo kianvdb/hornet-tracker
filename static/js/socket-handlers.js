@@ -98,6 +98,7 @@ function dispatchStatusUpdate(data) {
     updateBatteryQuickCard(data);
     updateBatteryNavbar(data);
     updateWifiNavbar(data);
+    updateGpsNavbar(data);
     updateWifiQuickCard(data);
     updateTelemQuickCard(data);
 }
@@ -264,6 +265,64 @@ function updateWifiNavbar(data) {
     navItem.classList.add('status-' + level);
 }
 
+
+/**
+ * Update de GPS indicator in de navbar.
+ *
+ * Toont één van drie states als hoofd-waarde:
+ *  - "Pixhawk offline"   (rood)  — geen MAVLink verbinding
+ *  - "Geen fix"          (oranje)— Pixhawk online maar geen 3D fix
+ *  - "<N> sats"          (groen) — 3D fix, met aantal satellieten
+ *
+ * Sub-label toont live hoogte zodra er een fix is.
+ * Popover toont volledige details inclusief lat/lon.
+ */
+function updateGpsNavbar(data) {
+    const navStatus = document.getElementById('nav-gps-status');
+    const navAlt    = document.getElementById('nav-gps-altitude');
+    const navItem   = document.getElementById('nav-gps');
+
+    let level;
+
+    if (!data.pixhawk_connected) {
+        navStatus.textContent = 'Pixhawk offline';
+        navAlt.textContent    = '';
+        level = 'bad';
+    } else if (!data.gps_fix) {
+        navStatus.textContent = 'Geen fix';
+        navAlt.textContent    = (data.gps_satellites || 0) + ' sats';
+        level = 'warn';
+    } else {
+        navStatus.textContent = (data.gps_satellites || '?') + ' sats';
+        navAlt.textContent    = (data.altitude || 0).toFixed(1) + ' m';
+        level = 'good';
+    }
+
+    navItem.classList.remove('status-good', 'status-ok', 'status-warn', 'status-bad');
+    navItem.classList.add('status-' + level);
+
+    // Popover-content
+    const pixEl = document.getElementById('pop-gps-pixhawk');
+    pixEl.textContent = data.pixhawk_connected ? 'ONLINE' : 'OFFLINE';
+    pixEl.style.color = data.pixhawk_connected ? '#4ade80' : '#f87171';
+
+    const fixEl = document.getElementById('pop-gps-fix');
+    fixEl.textContent = data.gps_fix ? '3D Fix' : 'Geen fix';
+    fixEl.style.color = data.gps_fix ? '#4ade80' : '#f87171';
+
+    document.getElementById('pop-gps-sats').textContent = data.gps_satellites || '--';
+
+    // Lat/Lon alleen tonen bij echte fix (niet 0,0)
+    if (data.gps_fix && data.gps_lat && data.gps_lon) {
+        document.getElementById('pop-gps-lat').textContent = data.gps_lat.toFixed(7) + '°';
+        document.getElementById('pop-gps-lon').textContent = data.gps_lon.toFixed(7) + '°';
+        document.getElementById('pop-gps-alt').textContent = (data.altitude || 0).toFixed(1) + ' m';
+    } else {
+        document.getElementById('pop-gps-lat').textContent = '--';
+        document.getElementById('pop-gps-lon').textContent = '--';
+        document.getElementById('pop-gps-alt').textContent = '--';
+    }
+}
 
 /**
  * Update de WiFi (Pi ↔ Grondstation) quick-card.
