@@ -260,7 +260,7 @@ function updateWifiNavbar(data) {
     // Status-kleur op navbar-item
     const bars = data.wifi_connected ? window.rssiToBars(data.wifi_rssi) : 0;
     const level = window.barsToStatusLevel(bars, data.wifi_connected && data.wifi_clients > 0);
-
+window.updateBars('nav-wifi-bars', bars);
     navItem.classList.remove('status-good', 'status-ok', 'status-warn', 'status-bad');
     navItem.classList.add('status-' + level);
 }

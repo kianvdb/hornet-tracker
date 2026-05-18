@@ -189,6 +189,25 @@ body.has-navbar {
     color: #888;
     font-style: italic;
 }
+/* ============================================
+   COMPACTE SIGNAAL BALKJES (in navbar items)
+   Hergebruikt het .signal-bars patroon uit cards.css maar kleiner.
+   ============================================ */
+
+.navbar-item .signal-bars {
+    height: 14px;
+    gap: 2px;
+    margin: 0;
+}
+
+.navbar-item .signal-bars .bar {
+    width: 3px;
+}
+
+.navbar-item .signal-bars .bar:nth-child(1) { height: 30%; }
+.navbar-item .signal-bars .bar:nth-child(2) { height: 55%; }
+.navbar-item .signal-bars .bar:nth-child(3) { height: 78%; }
+.navbar-item .signal-bars .bar:nth-child(4) { height: 100%; }
 
 /* ============================================
    RESPONSIVE
