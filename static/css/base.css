@@ -21,6 +21,8 @@ h1 {
     text-align: center;
     color: #f5a623;
     margin-bottom: 20px;
+    font-size: 1.4em;
+    margin-top: 0;
 }
 
 /* Gedeelde status-kleuren (gebruikt door cards, navbar, signal, etc.) */

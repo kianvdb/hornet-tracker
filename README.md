@@ -330,6 +330,7 @@ incrementele stap zonder dependencies te hoeven introduceren.
 - Server-side handlers voor `arm_drone` / `disarm_drone` / `set_mode`
 - Auto-discovery van best hoornaarnest-locatie op basis van signaal-piek
   + GPS-positie correlatie
+  feature/offline-tiles — Vendor Leaflet library + prefetch OpenStreetMap-tiles voor België zodat dashboard werkt zonder internet (vereist voor veldgebruik via hotspot)
 
 ---
 

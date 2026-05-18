@@ -17,9 +17,25 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/thermal.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/navbar.css') }}">
 </head>
-<body>
-    <h1>🐝 Hornet Tracker Dashboard</h1>
+<body class="has-navbar">
 
+    <!-- ============================================
+         VASTE NAVBAR — status indicatoren + acties.
+         Vult zich op met data via socket-handlers.js (volgende commits).
+         ============================================ -->
+    <nav class="navbar">
+        <div class="navbar-title">🐝 VespaTrack</div>
+
+        <div class="navbar-status">
+            <!-- Status-indicatoren komen hier in commit 2-5 -->
+        </div>
+
+        <div class="navbar-actions">
+            <!-- Shutdown / reboot knoppen komen hier in commit 5 -->
+        </div>
+    </nav>
+
+    <h1>🐝 Hornet Tracker Dashboard</h1>
     <!-- QUICK STATUS STRIP -->
     <div class="quick-status">
         <div class="quick-card" id="quick-battery">

@@ -1,0 +1,144 @@
+/**
+ * NAVBAR — vaste statusbalk bovenaan het dashboard
+ *
+ * Doel: status-indicatoren altijd zichtbaar zonder te scrollen. Geïnspireerd
+ * op smartphone-statusbalk (batterij, signaal, etc.).
+ *
+ * Layout: fixed bovenaan, full-width, fixed hoogte. Body krijgt
+ * padding-top om compensatie voor de vaste navbar.
+ */
+
+/* ============================================
+   NAVBAR CONTAINER
+   ============================================ */
+
+.navbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: #0f1729;
+    border-bottom: 1px solid #0f3460;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Body moet padding-top krijgen zodat content niet onder navbar verdwijnt */
+body.has-navbar {
+    padding-top: 76px;   /* 56px navbar + 20px existing body padding */
+}
+
+/* ============================================
+   NAVBAR SECTIES
+   ============================================ */
+
+/* App titel links */
+.navbar-title {
+    color: #f5a623;
+    font-size: 1.1em;
+    font-weight: bold;
+    margin-right: 24px;
+    white-space: nowrap;
+}
+
+/* Container voor status-indicatoren (vult ruimte tussen titel en knoppen) */
+.navbar-status {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex: 1;
+}
+
+/* Container voor actie-knoppen rechts (shutdown, reboot, etc.) */
+.navbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ============================================
+   STATUS INDICATORS (placeholders, vullen we in latere commits)
+   ============================================ */
+
+.navbar-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #aaa;
+    font-size: 0.9em;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.navbar-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.navbar-item-icon {
+    font-size: 1.1em;
+}
+
+.navbar-item-value {
+    color: #eee;
+    font-weight: bold;
+}
+
+/* Status-kleur varianten (gebruiken dezelfde semantiek als de quick cards) */
+.navbar-item.status-good  .navbar-item-value { color: #4ade80; }
+.navbar-item.status-ok    .navbar-item-value { color: #f5a623; }
+.navbar-item.status-warn  .navbar-item-value { color: #fb923c; }
+.navbar-item.status-bad   .navbar-item-value { color: #f87171; }
+
+/* ============================================
+   ACTIE KNOPPEN IN NAVBAR
+   ============================================ */
+
+.navbar-btn {
+    background: transparent;
+    border: 1px solid #0f3460;
+    color: #aaa;
+    padding: 6px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.85em;
+    transition: all 0.2s;
+}
+
+.navbar-btn:hover {
+    border-color: #f5a623;
+    color: #f5a623;
+}
+
+.navbar-btn.navbar-btn-danger:hover {
+    border-color: #f87171;
+    color: #f87171;
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+
+@media (max-width: 900px) {
+    .navbar {
+        height: auto;
+        flex-wrap: wrap;
+        padding: 8px 12px;
+        gap: 8px;
+    }
+    .navbar-status {
+        order: 3;
+        flex-basis: 100%;
+        gap: 12px;
+        font-size: 0.85em;
+    }
+    body.has-navbar {
+        padding-top: 100px;
+    }
+}
