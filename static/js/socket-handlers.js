@@ -83,12 +83,11 @@ function dispatchStatusUpdate(data) {
 
     // --- Quick status cards bovenaan (batterij, wifi, SiK) ---
     // Verdwijnen volledig in Doel 1 (vervangen door navbar).
-    updateBatteryQuickCard(data);
+  
     updateBatteryNavbar(data);
     updateWifiNavbar(data);
     updateGpsNavbar(data);
-    updateWifiQuickCard(data);
-    updateTelemQuickCard(data);
+
 }
 
 /**
@@ -106,37 +105,7 @@ function updateDroneStatusCard(data) {
         armedEl.className   = 'status-badge ' + (data.armed ? 'armed' : 'disarmed');
     }
 }
-/**
- * Update de bovenste batterij quick-card.
- *
- * Status-logica:
- *   - Pixhawk offline           -> bad (rood) - geen meting beschikbaar
- *   - <= 15%                    -> bad (rood) + critical fill
- *   - <= 30%                    -> warn (oranje) + low fill
- *   - <= 50%                    -> ok (geel)
- *   - > 50%                     -> good (groen)
- */
-function updateBatteryQuickCard(data) {
-    const batPct = data.battery_percent || 0;
 
-    document.getElementById('quick-battery-percent').textContent = batPct + '%';
-    document.getElementById('quick-battery-voltage').textContent =
-        (data.battery_voltage || 0).toFixed(2) + ' V';
-
-    const fill = document.getElementById('battery-fill');
-    fill.style.width = Math.max(0, Math.min(100, batPct)) + '%';
-    fill.classList.remove('low', 'critical');
-
-    let level = 'good';
-    if (batPct <= 15)      { fill.classList.add('critical'); level = 'bad';  }
-    else if (batPct <= 30) { fill.classList.add('low');      level = 'warn'; }
-    else if (batPct <= 50) { level = 'ok'; }
-
-    // Pixhawk offline overruled alles (geen betrouwbare meting)
-    if (!data.pixhawk_connected) level = 'bad';
-
-    window.setCardStatus('quick-battery', level);
-}
 
 /**
  * Update de batterij-indicator in de navbar.
@@ -281,56 +250,6 @@ function updateGpsNavbar(data) {
     }
 }
 
-/**
- * Update de WiFi (Pi ↔ Grondstation) quick-card.
- * Toont RSSI + aantal verbonden clients.
- */
-function updateWifiQuickCard(data) {
-    const bars = data.wifi_connected ? window.rssiToBars(data.wifi_rssi) : 0;
-    window.updateBars('wifi-bars', bars);
-
-    document.getElementById('quick-wifi-rssi').textContent =
-        data.wifi_connected ? data.wifi_rssi + ' dBm' : 'N/A';
-
-    const lab = data.wifi_connected
-        ? window.rssiLabel(data.wifi_rssi)
-        : { text: 'Geen verbinding', cls: 'label-bad' };
-
-    const labelEl = document.getElementById('quick-wifi-label');
-    labelEl.textContent = lab.text +
-        (data.wifi_connected ? ' · ' + data.wifi_clients + ' client(s)' : '');
-    labelEl.className = 'quick-sub ' + lab.cls;
-
-    window.setCardStatus('quick-wifi', window.barsToStatusLevel(bars, data.wifi_connected));
-}
-
-/**
- * Update de SiK telemetrie quick-card.
- *
- * RSSI is het minimum van local en remote (worst-of-both) zodat
- * een zwakke kant niet verborgen wordt door een sterke kant.
- */
-function updateTelemQuickCard(data) {
-    const rssi = Math.min(
-        data.telem_rssi_local  || -100,
-        data.telem_rssi_remote || -100
-    );
-    const bars = data.telem_connected ? window.rssiToBars(rssi) : 0;
-    window.updateBars('telem-bars', bars);
-
-    document.getElementById('quick-telem-rssi').textContent =
-        data.telem_connected ? rssi.toFixed(0) + ' dBm' : 'N/A';
-
-    const lab = data.telem_connected
-        ? window.rssiLabel(rssi)
-        : { text: 'Geen data', cls: 'label-bad' };
-
-    const labelEl = document.getElementById('quick-telem-label');
-    labelEl.textContent = lab.text;
-    labelEl.className   = 'quick-sub ' + lab.cls;
-
-    window.setCardStatus('quick-telem', window.barsToStatusLevel(bars, data.telem_connected));
-}
 
 // Expose op window
 window.registerCoreSocketHandlers = registerCoreSocketHandlers;
