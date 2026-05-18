@@ -134,8 +134,13 @@
         </div>
 
 
-        <div class="navbar-actions">
-            <!-- Shutdown / reboot knoppen komen hier in commit 5 -->
+       <div class="navbar-actions">
+            <button class="navbar-btn" onclick="showRebootModal()" title="Herstart Pi">
+                🔄 Herstart
+            </button>
+            <button class="navbar-btn navbar-btn-danger" onclick="showShutdownModal()" title="Pi afsluiten">
+                ⏻ Afsluiten
+            </button>
         </div>
     </nav>
 
@@ -184,10 +189,7 @@
                 <span class="status-label">GPS Fix</span>
                 <span class="status-value" id="gps-status">--</span>
             </div>
-            <div class="btn-group">
-                <button class="btn btn-secondary btn-small" onclick="showRebootModal()">🔄 Herstart Pi</button>
-                <button class="btn btn-danger btn-small" onclick="showShutdownModal()">⏻ Afsluiten</button>
-            </div>
+            
         </div>
         
         <div class="card">
