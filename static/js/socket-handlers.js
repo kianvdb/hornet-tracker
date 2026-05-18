@@ -97,6 +97,7 @@ function dispatchStatusUpdate(data) {
     // Verdwijnen volledig in Doel 1 (vervangen door navbar).
     updateBatteryQuickCard(data);
     updateBatteryNavbar(data);
+    updateWifiNavbar(data);
     updateWifiQuickCard(data);
     updateTelemQuickCard(data);
 }
@@ -220,6 +221,48 @@ function updateBatteryNavbar(data) {
     navItem.classList.add('status-' + level);
 }
 
+
+/**
+ * Update de WiFi (Pi ↔ Grondstation) indicator in de navbar.
+ * Toont RSSI van de zwakste verbonden client, aantal clients, en
+ * verbergt de RSSI wanneer er niemand verbonden is.
+ */
+function updateWifiNavbar(data) {
+    const navRssi    = document.getElementById('nav-wifi-rssi');
+    const navClients = document.getElementById('nav-wifi-clients');
+    const navItem    = document.getElementById('nav-wifi');
+
+    if (data.wifi_connected && data.wifi_clients > 0) {
+        navRssi.textContent    = data.wifi_rssi + ' dBm';
+        navClients.textContent = data.wifi_clients +
+            (data.wifi_clients === 1 ? ' client' : ' clients');
+    } else {
+        navRssi.textContent    = 'N/A';
+        navClients.textContent = '0 clients';
+    }
+
+    // Popover-content
+    document.getElementById('pop-wifi-rssi').textContent =
+        data.wifi_connected ? data.wifi_rssi + ' dBm' : 'N/A';
+    document.getElementById('pop-wifi-clients').textContent = data.wifi_clients || 0;
+
+    const labEl = document.getElementById('pop-wifi-label');
+    if (data.wifi_connected) {
+        const lab = window.rssiLabel(data.wifi_rssi);
+        labEl.textContent = lab.text;
+        labEl.className   = lab.cls;
+    } else {
+        labEl.textContent = 'Geen verbinding';
+        labEl.className   = 'label-bad';
+    }
+
+    // Status-kleur op navbar-item
+    const bars = data.wifi_connected ? window.rssiToBars(data.wifi_rssi) : 0;
+    const level = window.barsToStatusLevel(bars, data.wifi_connected && data.wifi_clients > 0);
+
+    navItem.classList.remove('status-good', 'status-ok', 'status-warn', 'status-bad');
+    navItem.classList.add('status-' + level);
+}
 
 
 /**

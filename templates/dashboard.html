@@ -55,7 +55,43 @@
                 </div>
             </div>
 
+            <!-- PI ↔ GRONDSTATION (WiFi hotspot) -->
+            <div class="navbar-item" id="nav-wifi" onclick="toggleNavPopover('wifi-popover')">
+                <span class="navbar-item-icon">📡</span>
+                <span class="navbar-item-value" id="nav-wifi-rssi">-- dBm</span>
+                <span class="navbar-item-sub" id="nav-wifi-clients">0 clients</span>
+
+                <div class="navbar-popover" id="wifi-popover">
+                    <div class="popover-title">Pi ↔ Grondstation</div>
+                    <div class="popover-row">
+                        <span>RSSI</span>
+                        <span id="pop-wifi-rssi">-- dBm</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Kwaliteit</span>
+                        <span id="pop-wifi-label">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Verbonden clients</span>
+                        <span id="pop-wifi-clients">0</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Interface</span>
+                        <span id="pop-wifi-iface">wlan1</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>SSID</span>
+                        <span>HornetTracker</span>
+                    </div>
+                    <div class="popover-hint">
+                        Comfast MT7612U USB adapter met dual 6dBi antennes.
+                        Hotspot IP 192.168.4.1.
+                    </div>
+                </div>
+            </div>
+
         </div>
+
 
         <div class="navbar-actions">
             <!-- Shutdown / reboot knoppen komen hier in commit 5 -->
