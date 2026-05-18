@@ -26,8 +26,35 @@
     <nav class="navbar">
         <div class="navbar-title">🐝 VespaTrack</div>
 
-        <div class="navbar-status">
-            <!-- Status-indicatoren komen hier in commit 2-5 -->
+      <div class="navbar-status">
+
+            <!-- BATTERIJ -->
+            <div class="navbar-item" id="nav-battery" onclick="toggleNavPopover('battery-popover')">
+                <span class="navbar-item-icon">🔋</span>
+                <span class="navbar-item-value" id="nav-battery-percent">--%</span>
+                <span class="navbar-item-sub" id="nav-battery-voltage">-- V</span>
+
+                <!-- Popover met detail -->
+                <div class="navbar-popover" id="battery-popover">
+                    <div class="popover-title">Drone batterij</div>
+                    <div class="popover-row">
+                        <span>Percentage</span>
+                        <span id="pop-battery-percent">--%</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Voltage</span>
+                        <span id="pop-battery-voltage">-- V</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Pixhawk status</span>
+                        <span id="pop-pixhawk-status">--</span>
+                    </div>
+                    <div class="popover-hint">
+                        Pixhawk telemetrie via USB-TTL (TELEM2 @ 57600 baud)
+                    </div>
+                </div>
+            </div>
+
         </div>
 
         <div class="navbar-actions">
@@ -271,6 +298,7 @@
     <script src="{{ url_for('static', filename='js/signal-display.js') }}"></script>
     <script src="{{ url_for('static', filename='js/socket-handlers.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modals.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>    
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

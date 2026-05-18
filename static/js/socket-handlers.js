@@ -96,6 +96,7 @@ function dispatchStatusUpdate(data) {
     // --- Quick status cards bovenaan (batterij, wifi, SiK) ---
     // Verdwijnen volledig in Doel 1 (vervangen door navbar).
     updateBatteryQuickCard(data);
+    updateBatteryNavbar(data);
     updateWifiQuickCard(data);
     updateTelemQuickCard(data);
 }
@@ -179,6 +180,47 @@ function updateBatteryQuickCard(data) {
 
     window.setCardStatus('quick-battery', level);
 }
+
+/**
+ * Update de batterij-indicator in de navbar.
+ * Naast de hoofd-waarde (% in navbar) wordt ook de popover-content gevuld.
+ *
+ * Status-logica is identiek aan updateBatteryQuickCard.
+ */
+function updateBatteryNavbar(data) {
+    const batPct = data.battery_percent || 0;
+    const voltage = (data.battery_voltage || 0).toFixed(2);
+
+    // Hoofd-waarde in navbar
+    document.getElementById('nav-battery-percent').textContent = batPct + '%';
+    document.getElementById('nav-battery-voltage').textContent = voltage + ' V';
+
+    // Popover-content
+    document.getElementById('pop-battery-percent').textContent = batPct + '%';
+    document.getElementById('pop-battery-voltage').textContent = voltage + ' V';
+
+    const pixEl = document.getElementById('pop-pixhawk-status');
+    if (data.pixhawk_connected) {
+        pixEl.textContent = 'ONLINE';
+        pixEl.style.color = '#4ade80';
+    } else {
+        pixEl.textContent = 'OFFLINE';
+        pixEl.style.color = '#f87171';
+    }
+
+    // Status-kleur op de navbar-item zelf
+    let level = 'good';
+    if (batPct <= 15)      level = 'bad';
+    else if (batPct <= 30) level = 'warn';
+    else if (batPct <= 50) level = 'ok';
+    if (!data.pixhawk_connected) level = 'bad';
+
+    const navItem = document.getElementById('nav-battery');
+    navItem.classList.remove('status-good', 'status-ok', 'status-warn', 'status-bad');
+    navItem.classList.add('status-' + level);
+}
+
+
 
 /**
  * Update de WiFi (Pi ↔ Grondstation) quick-card.

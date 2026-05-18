@@ -122,6 +122,75 @@ body.has-navbar {
 }
 
 /* ============================================
+   STATUS ITEM SUB-LABEL
+   (kleine grijze tekst rechts van de hoofd-waarde)
+   ============================================ */
+
+.navbar-item-sub {
+    color: #888;
+    font-size: 0.85em;
+    margin-left: 4px;
+}
+
+/* ============================================
+   POPOVER — klikbaar detail-paneel onder navbar-item
+   ============================================ */
+
+.navbar-item {
+    position: relative;   /* anchor voor de popover */
+}
+
+.navbar-popover {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    min-width: 260px;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 14px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+    z-index: 200;
+    cursor: default;       /* niet meer pointer want item is open */
+}
+
+.navbar-popover.show {
+    display: block;
+}
+
+.popover-title {
+    color: #f5a623;
+    font-weight: bold;
+    font-size: 0.95em;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #0f3460;
+}
+
+.popover-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+    font-size: 0.9em;
+    color: #aaa;
+}
+
+.popover-row span:last-child {
+    color: #eee;
+    font-weight: bold;
+}
+
+.popover-hint {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #0f3460;
+    font-size: 0.8em;
+    color: #888;
+    font-style: italic;
+}
+
+/* ============================================
    RESPONSIVE
    ============================================ */
 
