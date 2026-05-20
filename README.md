@@ -53,6 +53,9 @@ De Raspberry Pi op de drone draait een Flask + Socket.io webserver. De
 operator opent het dashboard in een browser op de veldlaptop. Alle
 communicatie tussen drone en grondstation gebeurt via Socket.io
 websockets zodat de UI in real-time updates ontvangt zonder polling.
+Commando's vanuit het dashboard (arm, disarm, mode-wijziging) gaan
+dezelfde weg terug naar de Pi en worden via MAVLink doorgestuurd naar
+de Pixhawk.
 
 ---
 
@@ -71,21 +74,27 @@ websockets zodat de UI in real-time updates ontvangt zonder polling.
 
 ### Sensoren
 
-- **GY-MCU90640 (MLX90640)** — thermische camera voor visuele bevestiging
+- **Pimoroni MLX90640 55°** — thermische camera (32×24 pixels) voor
+  visuele bevestiging van nest op korte afstand
 
 ### Communicatie
 
 - **USB-TTL CH340** — Pi ↔ Pixhawk verbinding (MAVLink op TELEM2)
 - **SiK Radio 433 MHz** — backup-telemetrie naar QGroundControl
+- **Comfast MT7612U** — USB WiFi-adapter op de Pi, host van veldhotspot
 
 ---
 
 ## Software stack
 
-- **Backend** — Python 3, Flask, Flask-SocketIO
-- **MAVLink** — pymavlink (commando's + telemetrie van Pixhawk)
-- **RF-detectie** — pyrtlsdr met FFT-based energy detection
-- **Frontend** — vanilla JavaScript (geen build-step), Leaflet voor de kaart
+- **Backend** — Python 3, Flask, Flask-SocketIO, threading-based
+  background loops voor signal/wifi/mavlink
+- **MAVLink** — pymavlink, bidirectioneel: telemetrie ontvangen
+  (GPS, batterij, mode, armed) én commando's sturen (arm/disarm/mode)
+- **RF-detectie** — pyrtlsdr met FFT-based energy detection, baseline
+  + peak-hold detectie
+- **Frontend** — vanilla JavaScript (geen build-step), Leaflet voor de
+  kaart, browser localStorage voor log-persistentie
 
 Het dashboard draait als achtergrondproces op de Raspberry Pi via een
 systemd service (`hornet-tracker.service`). Zie [Installatie](#installatie)
@@ -171,6 +180,28 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
+### 5. Comfast hotspot configureren (optioneel, voor veldwerk)
+
+Voor veldgebruik zonder router maakt de Pi een eigen WiFi-hotspot via
+de Comfast MT7612U USB-adapter op `wlan1`. NetworkManager regelt dit:
+
+```bash
+sudo nmcli device wifi hotspot \
+    ifname wlan1 \
+    con-name HornetTracker \
+    ssid HornetTracker \
+    password "<wachtwoord>"
+
+# Statisch IP op hotspot
+sudo nmcli connection modify HornetTracker \
+    ipv4.method shared \
+    ipv4.addresses 192.168.4.1/24 \
+    connection.autoconnect yes
+```
+
+Wlan0 (interne Pi WiFi) blijft beschikbaar voor SSH naar thuisnetwerk
+tijdens ontwikkeling.
+
 ---
 
 ## Service beheer
@@ -189,7 +220,8 @@ sudo journalctl -u hornet-tracker -f     # live logs volgen
 
 ```text
 hornet-tracker/
-├── app.py                          Flask + Socket.io backend
+├── app.py                          Flask + Socket.io backend, MAVLink,
+│                                   RTL-SDR, WiFi status, command handlers
 ├── README.md                       dit bestand
 ├── requirements.txt                Python dependencies
 ├── .gitignore
@@ -203,23 +235,25 @@ hornet-tracker/
     ├── css/                        modulaire styling per component
     │   ├── base.css                reset, body, gedeelde kleuren, responsive
     │   ├── layout.css              2-koloms dashboard layout
-    │   ├── cards.css               quick-status strip + grid cards
+    │   ├── navbar.css              vaste navbar bovenaan met status-popovers
+    │   ├── cards.css               grid cards + status rows + signaalbalkjes
     │   ├── signal.css              LoRa signal card
     │   ├── map.css                 Leaflet kaart + GPS-waiting badge
-    │   ├── coord-log.css           gelogde coördinaten + toast
-    │   ├── controls.css            knoppen + modals
-    │   ├── thermal.css             warmtecamera
-    │   └── navbar.css              navbar
+    │   ├── coord-log.css           gelogde coördinaten + status badges + toast
+    │   ├── controls.css            knoppen + modals + log-formulier velden
+    │   └── thermal.css             warmtecamera (in voorbereiding)
     │
     └── js/                         modulaire JavaScript per concern
         ├── utils.js                rssi helpers, toast, card status
-        ├── map.js                  Leaflet init, drone marker, trail
-        ├── coord-log.js            log positie, copy, export, clear
-        ├── drone-controls.js       arm/disarm/mode + command timeout
+        ├── map.js                  Leaflet init, drone marker, trail, click-handler
+        ├── coord-log.js            log entries, map-click pin, status/notitie,
+        │                           edit-flow, localStorage, CSV-export
+        ├── drone-controls.js       arm/disarm/mode + command result handler
         ├── signal-display.js       LoRa signal card + baseline reset
-        ├── socket-handlers.js      connect/disconnect/status_update
-        ├── modals.js               shutdown/reboot/arm dialoogvensters
-        └── main.js                 bootstrap (socket + init)
+        ├── navbar.js               popover toggle + click-outside-to-close
+        ├── socket-handlers.js      connect/disconnect/status_update dispatch
+        ├── modals.js               shutdown/reboot/arm/log dialoogvensters
+        └── main.js                 bootstrap (socket + init + localStorage load)
 ```
 
 ### Frontend module-volgorde
@@ -229,9 +263,10 @@ hornet-tracker/
 1. `utils.js`, `map.js`, `coord-log.js`, `drone-controls.js`,
    `signal-display.js` — definiëren functies op `window`, geen socket nodig.
 2. `socket-handlers.js` — handlers die `window.socket` gebruiken.
-3. `modals.js` — gebruikt `window.socket` voor shutdown/reboot.
-4. `main.js` — bootstrap: maakt de socket aan en initialiseert alles
-   na `DOMContentLoaded`.
+3. `modals.js` — dialog-logica voor shutdown/reboot/arm/log-modal.
+4. `navbar.js` — popover open/sluit logica voor navbar-items.
+5. `main.js` — bootstrap: maakt de socket aan, laadt log uit localStorage,
+   initialiseert alles na `DOMContentLoaded`.
 
 Alle module-functies worden op `window` gezet zodat inline
 `onclick="..."` handlers in de HTML rechtstreeks werken zonder
@@ -249,8 +284,15 @@ Het dashboard is bereikbaar op poort 5000. Afhankelijk van de setup:
 | `http://192.168.1.3:5000`        | direct IP op thuisnetwerk                |
 | `http://192.168.4.1:5000`        | HornetTracker hotspot (veldwerk)         |
 
-De Pi draait optioneel een eigen WiFi-hotspot op `wlan1` zodat de
-veldlaptop in het veld zonder router verbinding kan maken.
+De Pi draait optioneel een eigen WiFi-hotspot op `wlan1` (Comfast
+MT7612U) zodat de veldlaptop in het veld zonder router verbinding kan
+maken.
+
+> **Offline-werking is nog niet volledig.** De kaart laadt momenteel
+> tiles van OpenStreetMap/ArcGIS over internet, dus zonder uplink
+> verschijnt het dashboard wel maar blijft de kaart leeg. Dit wordt
+> opgelost in de geplande `feature/offline-tiles` branch (vendored
+> Leaflet library + pre-cached tiles voor België).
 
 ---
 
@@ -269,14 +311,36 @@ git checkout main
 git merge --no-ff feature/<beschrijving>
 ```
 
-Lopende en geplande feature-branches:
+Branches worden na merge bewust **behouden** (niet verwijderd) zodat
+de volledige ontwikkel-historiek zichtbaar blijft in `git log --graph`.
+Dit is een keuze voor de thesis-verdediging: een lezer kan zo per
+feature inzoomen op de chronologie van een onderdeel.
 
-- `feature/dashboard-refactor` — modulaire structuur (afgerond)
-- `feature/thermal-camera` — MLX90640 integratie via I2C
-- `feature/navbar-redesign` — navbar zodat dashboard zonder scrollen werkt
-- `feature/lora-packet-decoding` — Ra-01 in productie zetten
-- `feature/drone-command-handlers` — `arm_drone` / `disarm_drone` /
-  `set_mode` server-side implementatie
+**Afgerond:**
+
+- `feature/dashboard-refactor` — modulaire CSS + JS structuur
+- `feature/dashboard-redesign` — navbar met klikbare popovers, 2-koloms
+  layout, oude cards/strip verwijderd
+- `feature/log-status-flow` — map-click pin, status + notitie per entry,
+  edit-flow, localStorage persistentie
+- `feature/drone-command-handlers` — server-side `arm_drone` /
+  `disarm_drone` / `set_mode` handlers
+
+**Lopende (wacht op hardware):**
+
+- `feature/thermal-camera` — Pimoroni MLX90640 integratie via I2C
+- `feature/lora-packet-decoding` — Ra-01 SX1278 in productie zetten ter
+  vervanging van RTL-SDR energy detection
+
+**Gepland:**
+
+- `feature/offline-tiles` — vendor Leaflet + pre-cached
+  OpenStreetMap-tiles voor België zodat dashboard werkt zonder internet
+- `feature/xlsx-export` — gestileerde Excel-export ter vervanging van
+  losse CSV (relevant voor delen met bestrijders-instanties)
+- `feature/log-backend-persistence` — log opslaan in SQLite of JSON op
+  de Pi i.p.v. alleen browser-localStorage; voorbereiding voor
+  toekomstige bestrijders-platform sync
 
 ### Commit messages
 
@@ -316,22 +380,47 @@ incrementele stap zonder dependencies te hoeven introduceren.
 ### Afgerond
 
 - Real-time MAVLink telemetrie (GPS, batterij, hoogte, mode, armed)
-- RTL-SDR signal detection met automatische baseline
+- RTL-SDR signal detection met automatische baseline + peak-hold
 - Leaflet kaart met satelliet/stratenplan en drone-tracking
-- Coördinaat-log met Google Maps deeplinks en CSV-export
 - Pi shutdown/reboot via dashboard
 - Modulaire CSS + JS structuur
+- Navbar met klikbare popovers (batterij, Pi-grondstation, GPS)
+- 2-koloms layout voor minimaal scrollen op 1920 × 1080
+- Comfast hotspot voor veldgebruik zonder router
+- Coördinaat-log met:
+  - drone-positie loggen én manueel pinnen op kaart
+  - status per entry (gemeld / wordt onderzocht / waargenomen /
+    bestreden / vals alarm / leeg laten)
+  - vrije notitie per entry
+  - source-tracking (drone vs manueel) met visuele iconen
+  - bewerken van bestaande entries via potlood-knop
+  - localStorage persistentie (overleeft browser-refresh)
+  - CSV-export met alle velden
+  - Google Maps deeplinks
+- Server-side handlers voor `arm_drone` / `disarm_drone` / `set_mode`
 
 ### In planning
 
-- MLX90640 warmtecamera integratie via I2C
-- Navbar redesign zodat het hele dashboard zonder scrollen werkt
-  op 1920 × 1080
+- MLX90640 warmtecamera integratie via I2C (Pimoroni 55° onderweg)
 - Ra-01 LoRa-pakketdecodering ter vervanging van RTL-SDR energy detection
-- Server-side handlers voor `arm_drone` / `disarm_drone` / `set_mode`
-- Auto-discovery van best hoornaarnest-locatie op basis van signaal-piek
-  + GPS-positie correlatie
-  feature/offline-tiles — Vendor Leaflet library + prefetch OpenStreetMap-tiles voor België zodat dashboard werkt zonder internet (vereist voor veldgebruik via hotspot)
+- Offline kaart-tiles voor echt veldgebruik zonder internet
+- Gestileerde XLSX-export ter vervanging van losse CSV
+- Backend-persistentie voor log (SQLite of JSON op de Pi)
+- Layout-finetuning na thermal- en LoRa-integratie zodat alle cards
+  exact passen op 1920 × 1080 zonder scrollen
+- Besturing card collapse-toggle (mode-knoppen verbergen tijdens vlucht
+  om ruimte vrij te maken voor kaart en warmtebeeld)
+
+### Toekomstige uitbreidingen (visie, niet gepland)
+
+- Bestrijders-platform: webapp/mobile app waar erkende bestrijders
+  gevalideerde nest-locaties kunnen zien, "claimen" zodat geen twee
+  partijen tegelijk uitrukken, en status-updates kunnen pushen
+  (waargenomen → bestreden). Vereist authenticatie, certificaat-upload,
+  GDPR-compliance. Wordt eerst uitgewerkt als ontwerpvisie in het
+  thesis-rapport.
+- Auto-discovery van nestlocatie op basis van signaal-piek + GPS-positie
+  correlatie
 
 ---
 
