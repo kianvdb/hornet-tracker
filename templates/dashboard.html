@@ -270,6 +270,58 @@
         </div>
     </div>
 
+    <!-- Log-entry modal (verschijnt bij Log Positie of map-click) -->
+    <div class="modal" id="log-modal">
+        <div class="modal-content" style="min-width: 420px; text-align: left;">
+            <h3 id="log-modal-title">📌 Positie loggen</h3>
+
+            <!-- Source-indicator: laat zien of dit een drone-pin of manual pin is -->
+            <div id="log-modal-source" style="color:#aaa; font-size:0.9em; margin-bottom:12px;">
+                <!-- ingevuld door JS -->
+            </div>
+
+            <!-- Coordinaten preview -->
+            <div style="background:#0f3460; padding:10px; border-radius:6px;
+                        margin-bottom:14px; font-family:'Consolas',monospace; font-size:0.9em;">
+                <div>📍 <span id="log-modal-coords">--, --</span></div>
+                <div style="color:#aaa; margin-top:4px;">
+                    Alt: <span id="log-modal-alt">--</span> m
+                </div>
+            </div>
+
+            <!-- Status keuze -->
+            <div style="margin-bottom:14px;">
+                <label style="display:block; color:#aaa; font-size:0.9em; margin-bottom:6px;">
+                    Status
+                </label>
+                <select id="log-modal-status" class="log-status-select">
+                    <option value="">Leeg laten (later invullen)</option>
+                    <option value="gemeld">Gemeld</option>
+                    <option value="wordt_onderzocht">Wordt onderzocht</option>
+                    <option value="waargenomen">Waargenomen</option>
+                    <option value="bestreden">Bestreden</option>
+                    <option value="vals_alarm">Vals alarm</option>
+                </select>
+            </div>
+
+            <!-- Notitie veld -->
+            <div style="margin-bottom:18px;">
+                <label style="display:block; color:#aaa; font-size:0.9em; margin-bottom:6px;">
+                    Notitie (optioneel)
+                </label>
+                <textarea id="log-modal-notes"
+                          rows="3"
+                          placeholder="bv. groot nest in eik, ~6m hoog, achterkant tuin"
+                          class="log-notes-input"></textarea>
+            </div>
+
+            <div class="btn-group" style="justify-content: flex-end;">
+                <button class="btn btn-secondary" onclick="cancelLogEntry()">Annuleren</button>
+                <button class="btn btn-success" onclick="confirmLogEntry()">Opslaan</button>
+            </div>
+        </div>
+    </div>
+
     <div class="modal" id="shutdown-modal">
         <div class="modal-content">
             <h3>⏻ Pi Afsluiten</h3>

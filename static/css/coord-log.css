@@ -135,3 +135,39 @@
     opacity: 1;
     transform: translateY(0);
 }
+
+/* ============================================
+   STATUS BADGES + SOURCE ICONEN in coord-log entries
+   ============================================ */
+
+.coord-source {
+    font-size: 0.95em;
+    margin-right: 4px;
+}
+
+.coord-status {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.7em;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+.coord-status.status-gemeld           { background: #0f3460; color: #aaa; }
+.coord-status.status-wordt_onderzocht { background: #f5a623; color: #1a1a2e; }
+.coord-status.status-waargenomen      { background: #4ade80; color: #1a1a2e; }
+.coord-status.status-bestreden        { background: #22c55e; color: #fff; }
+.coord-status.status-vals_alarm       { background: #6b7280; color: #fff; }
+
+/* Notitie tekst onder de entry */
+.coord-notes {
+    color: #aaa;
+    font-size: 0.78em;
+    font-style: italic;
+    margin-top: 4px;
+    margin-left: 18px;
+    line-height: 1.3;
+}

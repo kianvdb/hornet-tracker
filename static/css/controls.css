@@ -88,3 +88,32 @@
     color: #4ade80;
     margin-bottom: 20px;
 }
+
+/* ============================================
+   LOG-MODAL FORMULIER VELDEN
+   ============================================ */
+
+.log-status-select,
+.log-notes-input {
+    width: 100%;
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    color: #eee;
+    padding: 8px 10px;
+    border-radius: 5px;
+    font-family: inherit;
+    font-size: 0.95em;
+    box-sizing: border-box;
+}
+
+.log-status-select:focus,
+.log-notes-input:focus {
+    outline: none;
+    border-color: #f5a623;
+}
+
+.log-notes-input {
+    resize: vertical;
+    min-height: 60px;
+    max-height: 200px;
+}
