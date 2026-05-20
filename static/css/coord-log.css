@@ -92,6 +92,11 @@
     color: #4ade80;
 }
 
+.coord-btn.coord-btn-danger:hover {
+    background: #f87171;
+    color: #fff;
+}
+
 /* Header boven de log-lijst (telling + wis-knop) */
 .log-header {
     display: flex;

@@ -322,6 +322,7 @@ function updateLogDisplay() {
                 <button class="coord-btn" onclick="editCoord(${i})" title="Bewerken">✏️</button>
                 <button class="coord-btn" onclick="copyCoord(${i})" title="Kopieer">📋</button>
                 <a class="coord-btn" href="${gmapsUrl}" target="_blank" title="Open in Google Maps">🗺️</a>
+                <button class="coord-btn coord-btn-danger" onclick="deleteCoord(${i})" title="Verwijderen">🗑️</button>
             </div>
         </div>`;
     }
@@ -359,6 +360,33 @@ function fallbackCopy(text) {
     document.execCommand('copy');
     document.body.removeChild(ta);
     window.showToast(`📋 Gekopieerd: ${text}`);
+}
+
+/**
+ * Verwijder één entry uit de log. Vraagt bevestiging, ruimt marker op,
+ * herrendert lijst, syncschrijft naar localStorage.
+ *
+ * Nummers van entries onder de verwijderde schuiven op (entry #3 wordt
+ * #2 enz). Dat is acceptabel voor visuele presentatie — voor een echte
+ * stabiele identificatie zou later een UUID per entry nodig zijn.
+ */
+function deleteCoord(index) {
+    if (index < 0 || index >= coordLog.length) return;
+    if (!confirm(`Entry #${index + 1} verwijderen?`)) return;
+
+    // Verwijder marker van kaart
+    const map = window.getCurrentMap();
+    if (logMarkers[index]) {
+        map.removeLayer(logMarkers[index]);
+    }
+    logMarkers.splice(index, 1);
+
+    // Verwijder entry uit array
+    coordLog.splice(index, 1);
+
+    saveCoordLogToStorage();
+    updateLogDisplay();
+    window.showToast('Entry verwijderd');
 }
 
 function clearLog() {
@@ -541,3 +569,4 @@ window.buildExportList         = buildExportList;
 window.updateExportCounter     = updateExportCounter;
 window.toggleSelectAllExport   = toggleSelectAllExport;
 window.confirmExport           = confirmExport;
+window.deleteCoord = deleteCoord;
