@@ -2,14 +2,6 @@
    MAP — Leaflet kaartcontainer + bediening + info
    ============================================ */
 
-/* Section bevat de map links en coord-log rechts */
-.map-section {
-    max-width: 1400px;
-    margin: 20px auto 0 auto;
-    display: grid;
-    grid-template-columns: 1fr 350px;
-    gap: 20px;
-}
 
 /* Wrapper card voor zowel kaart als coord-log */
 .map-card {
@@ -30,7 +22,7 @@
 /* Leaflet container */
 #map {
     width: 100%;
-    height: 400px;
+    height: 450px;
     border-radius: 8px;
     border: 1px solid #0f3460;
 }
@@ -83,4 +75,12 @@
     pointer-events: none;       /* klik gaat door naar kaart */
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     animation: pulse 2s infinite;
+}
+/* ============================================
+   RESPONSIVE — mobile / smalle schermen
+   ============================================ */
+@media (max-width: 900px) {
+
+ 
+    #map            { height: 300px; }
 }

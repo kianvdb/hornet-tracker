@@ -202,6 +202,7 @@ hornet-tracker/
     │
     ├── css/                        modulaire styling per component
     │   ├── base.css                reset, body, gedeelde kleuren, responsive
+    │   ├── layout.css              2-koloms dashboard layout
     │   ├── cards.css               quick-status strip + grid cards
     │   ├── signal.css              LoRa signal card
     │   ├── map.css                 Leaflet kaart + GPS-waiting badge

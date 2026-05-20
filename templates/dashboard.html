@@ -16,6 +16,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/controls.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/thermal.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/navbar.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/layout.css') }}">
 </head>
 <body class="has-navbar">
 
@@ -144,104 +145,111 @@
         </div>
     </nav>
  
-    <!-- MAIN GRID -->
-    <div class="grid">
-        
-        
-        <div class="card">
-            <h2>📻 LoRa Signaal (433 MHz)</h2>
-            <div class="big-number" id="signal-delta">+0.0 dB</div>
-            <div class="signal-bar-container">
-                <div class="signal-bar" id="signal-bar" style="width: 0%"></div>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Power</span>
-                <span class="status-value" id="signal-power">-- dB</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Baseline</span>
-                <span>
-                    <span class="status-value" id="signal-baseline">-- dB</span>
-                    <button class="btn btn-small" id="reset-baseline-btn" onclick="resetBaseline()">Reset</button>
-                </span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Detectie</span>
-                <span class="status-value" id="signal-detected">--</span>
-            </div>
-        </div>
-        
-       
+    <!-- DASHBOARD LAYOUT — 2 koloms voor no-scroll viewport -->
+    <div class="dashboard-layout">
 
-        <!-- DRONE CONTROLS -->
-        <div class="card">
-            <h2>🎮 Besturing</h2>
-             <!-- Armed status indicator (was vroeger in Drone Status card) -->
-            <div style="text-align:center; margin-bottom:15px;">
-                <span id="armed-status" class="status-badge disarmed">DISARMED</span>
-            </div>
-            
-            <div style="display:flex;gap:10px;margin-bottom:15px;">
-                <button class="btn btn-success" id="btn-arm" onclick="armDrone()" style="flex:1;padding:12px;font-size:1.1em;">
-                    🔓 ARM
-                </button>
-                <button class="btn btn-danger" id="btn-disarm" onclick="disarmDrone()" style="flex:1;padding:12px;font-size:1.1em;">
-                    🔒 DISARM
-                </button>
-            </div>
+        <!-- LINKER KOLOM: info & controls -->
+        <div class="dashboard-col">
 
-            <div style="margin-bottom:12px;">
-                <span class="status-label" style="display:block;margin-bottom:6px;">Flight Mode</span>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(0)">STABILIZE</button>
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(2)">ALT_HOLD</button>
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(5)">LOITER</button>
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(6)">RTL</button>
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(9)">LAND</button>
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(4)">GUIDED</button>
+            <div class="card">
+                <h2>📻 LoRa Signaal (433 MHz)</h2>
+                <div class="big-number" id="signal-delta">+0.0 dB</div>
+                <div class="signal-bar-container">
+                    <div class="signal-bar" id="signal-bar" style="width: 0%"></div>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Power</span>
+                    <span class="status-value" id="signal-power">-- dB</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Baseline</span>
+                    <span>
+                        <span class="status-value" id="signal-baseline">-- dB</span>
+                        <button class="btn btn-small" id="reset-baseline-btn" onclick="resetBaseline()">Reset</button>
+                    </span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Detectie</span>
+                    <span class="status-value" id="signal-detected">--</span>
                 </div>
             </div>
 
-            <div id="command-feedback" style="font-size:0.85em;color:#aaa;min-height:20px;margin-top:8px;">
-                Klaar voor commando's
+            <!-- DRONE CONTROLS -->
+            <div class="card">
+                <h2>🎮 Besturing</h2>
+
+                <!-- Armed status indicator (was vroeger in Drone Status card) -->
+                <div style="text-align:center; margin-bottom:15px;">
+                    <span id="armed-status" class="status-badge disarmed">DISARMED</span>
+                </div>
+
+                <div style="display:flex;gap:10px;margin-bottom:15px;">
+                    <button class="btn btn-success" id="btn-arm" onclick="armDrone()" style="flex:1;padding:12px;font-size:1.1em;">
+                        🔓 ARM
+                    </button>
+                    <button class="btn btn-danger" id="btn-disarm" onclick="disarmDrone()" style="flex:1;padding:12px;font-size:1.1em;">
+                        🔒 DISARM
+                    </button>
+                </div>
+
+                <div style="margin-bottom:12px;">
+                    <span class="status-label" style="display:block;margin-bottom:6px;">Flight Mode</span>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(0)">STABILIZE</button>
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(2)">ALT_HOLD</button>
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(5)">LOITER</button>
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(6)">RTL</button>
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(9)">LAND</button>
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(4)">GUIDED</button>
+                    </div>
+                </div>
+
+                <div id="command-feedback" style="font-size:0.85em;color:#aaa;min-height:20px;margin-top:8px;">
+                    Klaar voor commando's
+                </div>
             </div>
+
+            <div class="card">
+                <h2>🌡️ Thermisch Beeld</h2>
+                <div class="thermal-placeholder">MLX90640 (later)</div>
+            </div>
+
         </div>
 
-        <div class="card">
-            <h2>🌡️ Thermisch Beeld</h2>
-            <div class="thermal-placeholder">MLX90640 (later)</div>
-        </div>
-    </div>
+        <!-- RECHTER KOLOM: visualisatie -->
+        <div class="dashboard-col">
 
-    <!-- MAP + COORDINATE LOG -->
-    <div class="map-section">
-        <div class="map-card">
-            <h2>🗺️ Live Positie</h2>
-            <div id="gps-waiting-badge">⏳ Wachten op GPS fix...</div>
+            <div class="map-card">
+                <h2>🗺️ Live Positie</h2>
+                <div id="gps-waiting-badge">⏳ Wachten op GPS fix...</div>
                 <div id="map"></div>
-            <div class="map-info">
-                <div>Lat: <span id="map-lat">--</span></div>
-                <div>Lon: <span id="map-lon">--</span></div>
-                <div>Alt: <span id="map-alt">--</span> m</div>
-                <div>Sats: <span id="map-sats">--</span></div>
+                <div class="map-info">
+                    <div>Lat: <span id="map-lat">--</span></div>
+                    <div>Lon: <span id="map-lon">--</span></div>
+                    <div>Alt: <span id="map-alt">--</span> m</div>
+                    <div>Sats: <span id="map-sats">--</span></div>
+                </div>
+                <div class="map-controls">
+                    <button class="btn btn-small" onclick="logCoordinate()">📌 Log Positie</button>
+                    <button class="btn btn-small btn-secondary" onclick="toggleTrail()">🔄 Trail aan/uit</button>
+                    <button class="btn btn-small btn-secondary" onclick="centerMap()">🎯 Centreer</button>
+                    <button class="btn btn-small btn-secondary" onclick="exportLog()">💾 Export CSV</button>
+                </div>
             </div>
-            <div class="map-controls">
-                <button class="btn btn-small" onclick="logCoordinate()">📌 Log Positie</button>
-                <button class="btn btn-small btn-secondary" onclick="toggleTrail()">🔄 Trail aan/uit</button>
-                <button class="btn btn-small btn-secondary" onclick="centerMap()">🎯 Centreer</button>
-                <button class="btn btn-small btn-secondary" onclick="exportLog()">💾 Export CSV</button>
+
+            <div class="map-card">
+                <h2>📌 Coördinaat Log</h2>
+                <div class="log-header">
+                    <span class="log-count" id="log-count">0 punten</span>
+                    <button class="btn btn-small btn-danger" onclick="clearLog()">Wissen</button>
+                </div>
+                <div class="coord-log" id="coord-log">
+                    <div class="coord-empty">Klik "📌 Log Positie" om coördinaten op te slaan</div>
+                </div>
             </div>
+
         </div>
-        <div class="map-card">
-            <h2>📌 Coördinaat Log</h2>
-            <div class="log-header">
-                <span class="log-count" id="log-count">0 punten</span>
-                <button class="btn btn-small btn-danger" onclick="clearLog()">Wissen</button>
-            </div>
-            <div class="coord-log" id="coord-log">
-                <div class="coord-empty">Klik "📌 Log Positie" om coördinaten op te slaan</div>
-            </div>
-        </div>
+
     </div>
 
 

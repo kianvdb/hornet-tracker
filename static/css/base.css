@@ -40,11 +40,4 @@ h1 {
     50%      { opacity: 0.5; }
 }
 
-/* ============================================
-   RESPONSIVE — mobile / smalle schermen
-   ============================================ */
-@media (max-width: 900px) {
 
-    .map-section    { grid-template-columns: 1fr; }
-    #map            { height: 300px; }
-}
