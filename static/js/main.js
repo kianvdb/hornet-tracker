@@ -33,7 +33,7 @@
         // zoomt later in op echte GPS-fix.
         window.initMap();
 
-        // Lege coord-log placeholder renderen
+      window.loadCoordLogFromStorage();   // herstelt log na refresh
         window.updateLogDisplay();
 
         // Module-specifieke socket handlers registreren.

@@ -2,69 +2,200 @@
  * COORD-LOG — gelogde coordinaten met pins op kaart
  *
  * Bevat:
- *  - logCoordinate()    log huidige drone positie (incl. hoogte + tijd)
- *  - updateLogDisplay() render lijst rechts van de kaart
- *  - copyCoord(index)   kopieer "lat, lon" naar clipboard
- *  - clearLog()         wis alle gelogde punten (met confirm)
- *  - exportLog()        download CSV met alle punten
+ *  - logCoordinate()              start log-flow voor huidige drone-positie (auto)
+ *  - handleMapClick(latlng)       start log-flow voor manueel geprikte locatie
+ *  - openLogModal(data)           open de log-modal met voor-gevulde defaults
+ *  - confirmLogEntry()            opslaan vanuit modal (status + notitie)
+ *  - updateLogDisplay()           render lijst rechts van de kaart
+ *  - copyCoord(index)             kopieer "lat, lon" naar clipboard
+ *  - clearLog()                   wis alle gelogde punten
+ *  - exportLog()                  download CSV
  *
- * Afhankelijkheden:
- *  - window.getCurrentMap()  Leaflet map instance van map.js
- *  - window.hasFix()         of er een geldige GPS-fix is
- *  - window.showToast()      notificatie helper van utils.js
- *  - DOM: #map-lat #map-lon #map-alt #coord-log #log-count
- *
- * Pins worden direct op de Leaflet kaart geplaatst (geen aparte layer).
+ * Entry-structuur:
+ *   {
+ *     lat, lon, alt,
+ *     time, date,                    // tijdstempel
+ *     source: 'drone' | 'manueel',   // hoe is deze pin ontstaan
+ *     status: '' | 'gemeld' | ...    // operator-toegekende status
+ *     notes: ''                      // vrije tekst
+ *   }
  */
 
-/** Array met alle gelogde punten: {lat, lon, alt, time, date} */
+/** Array met alle gelogde punten */
 let coordLog = [];
 
+/** Pending entry tijdens modal-flow (wachten op operator confirm) */
+let pendingEntry = null;
+/** Houdt geplaatste markers bij zodat we ze later kunnen verwijderen */
+let logMarkers = [];
+/** Storage key voor localStorage persistence */
+const STORAGE_KEY = 'hornet-tracker-coordlog-v1';
+
 /**
- * Log de huidige drone positie. Leest uit de map-info regel die door
- * map.js wordt bijgehouden. Plaatst een pin-marker op de kaart.
+ * Laad gelogde coördinaten uit localStorage bij page-init.
+ * Roep aan vanuit main.js bij DOMContentLoaded, voor updateLogDisplay().
+ */
+function loadCoordLogFromStorage() {
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+                coordLog = parsed;
+                console.log(`[coord-log] ${coordLog.length} entries geladen uit localStorage`);
+                // Plaats markers terug op de kaart
+                coordLog.forEach((entry, idx) => placeMarker(entry, idx + 1));
+            }
+        }
+    } catch (err) {
+        console.warn('[coord-log] kon localStorage niet lezen:', err);
+    }
+}
+
+/**
+ * Persisteer huidige log naar localStorage.
+ * Wordt aangeroepen na elke add/clear operatie.
+ */
+function saveCoordLogToStorage() {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(coordLog));
+    } catch (err) {
+        console.warn('[coord-log] kon niet opslaan naar localStorage:', err);
+    }
+}
+
+/**
+ * Auto-log: gebruik huidige drone-positie. Triggered door 'Log Positie' knop.
+ * Vereist een actieve GPS-fix.
  */
 function logCoordinate() {
     const lat = parseFloat(document.getElementById('map-lat').textContent);
     const lon = parseFloat(document.getElementById('map-lon').textContent);
     const alt = parseFloat(document.getElementById('map-alt').textContent);
 
-    // Geen GPS-fix beschikbaar
     if (!window.hasFix() || isNaN(lat) || isNaN(lon) || (lat === 0 && lon === 0)) {
         window.showToast('Geen GPS positie beschikbaar');
         return;
     }
 
-    const now = new Date();
-    const time = now.toLocaleTimeString('nl-BE', {
-        hour: '2-digit', minute: '2-digit', second: '2-digit'
+    openLogModal({
+        lat: lat,
+        lon: lon,
+        alt: isNaN(alt) ? 0 : alt,
+        source: 'drone',
+        defaultStatus: 'wordt_onderzocht'
     });
-
-    const entry = { lat, lon, alt, time, date: now.toISOString() };
-    coordLog.push(entry);
-
-    // Pin marker plaatsen op de kaart
-    const map = window.getCurrentMap();
-    const pinIcon = L.divIcon({
-        html: `<div style="font-size:18px;">📌</div>`,
-        className: '',
-        iconSize: [18, 18],
-        iconAnchor: [9, 18]
-    });
-    const marker = L.marker([lat, lon], { icon: pinIcon }).addTo(map);
-    marker.bindPopup(
-        `<b>#${coordLog.length}</b><br>` +
-        `${lat.toFixed(7)}, ${lon.toFixed(7)}<br>` +
-        `Alt: ${alt.toFixed(1)}m<br>${time}`
-    );
-
-    updateLogDisplay();
-    window.showToast(`📌 Positie #${coordLog.length} gelogd`);
 }
 
 /**
- * Render alle gelogde punten in de coord-log container (rechts van kaart).
- * Nieuwste bovenaan. Leeg = placeholder tonen.
+ * Manual log: triggered door klik op de kaart. Hoogte is onbekend (operator
+ * pint vanaf de grond, niet vanuit drone-perspectief) — vullen we als 0 in.
+ */
+function handleMapClick(latlng) {
+    openLogModal({
+        lat: latlng.lat,
+        lon: latlng.lng,
+        alt: 0,
+        source: 'manueel',
+        defaultStatus: 'gemeld'
+    });
+}
+
+/**
+ * Open de log-modal en vul defaults. Operator kiest status + notitie,
+ * klikt opslaan → confirmLogEntry() persisteert.
+ */
+function openLogModal(data) {
+    pendingEntry = data;
+
+    // Titel + source-tekst
+    const title  = document.getElementById('log-modal-title');
+    const source = document.getElementById('log-modal-source');
+    if (data.source === 'drone') {
+        title.textContent  = '🚁 Drone-positie loggen';
+        source.textContent = 'Pin geplaatst op huidige drone-positie';
+    } else {
+        title.textContent  = '📍 Locatie loggen';
+        source.textContent = 'Pin handmatig geplaatst door operator';
+    }
+
+    // Coördinaten preview
+    document.getElementById('log-modal-coords').textContent =
+        data.lat.toFixed(7) + ', ' + data.lon.toFixed(7);
+    document.getElementById('log-modal-alt').textContent = data.alt.toFixed(1);
+
+    // Defaults
+    document.getElementById('log-modal-status').value = data.defaultStatus || '';
+    document.getElementById('log-modal-notes').value  = '';
+
+    document.getElementById('log-modal').classList.add('show');
+}
+
+/**
+ * Opslaan-knop in log-modal. Bouwt entry, plaatst marker, sluit modal.
+ */
+function confirmLogEntry() {
+    if (!pendingEntry) return;
+
+    const status = document.getElementById('log-modal-status').value;
+    const notes  = document.getElementById('log-modal-notes').value.trim();
+    const now    = new Date();
+    const time   = now.toLocaleTimeString('nl-BE', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+
+    const entry = {
+        lat:    pendingEntry.lat,
+        lon:    pendingEntry.lon,
+        alt:    pendingEntry.alt,
+        time:   time,
+        date:   now.toISOString(),
+        source: pendingEntry.source,
+        status: status,
+        notes:  notes
+    };
+
+    coordLog.push(entry);
+
+    // Marker op kaart
+    placeMarker(entry, coordLog.length);
+
+    pendingEntry = null;
+    window.hideModals();
+    updateLogDisplay();
+    saveCoordLogToStorage();
+    window.showToast(`📌 Entry #${coordLog.length} opgeslagen`);
+}
+
+/**
+ * Plaats een Leaflet marker met source-specifiek icoon en popup-info.
+ */
+function placeMarker(entry, index) {
+    const map = window.getCurrentMap();
+    const iconEmoji = entry.source === 'drone' ? '🚁' : '📍';
+    const pinIcon = L.divIcon({
+        html: `<div style="font-size:20px;">${iconEmoji}</div>`,
+        className: '',
+        iconSize: [20, 20],
+        iconAnchor: [10, 20]
+    });
+    const marker = L.marker([entry.lat, entry.lon], { icon: pinIcon }).addTo(map);
+logMarkers.push(marker);
+    let popupHtml = `<b>#${index}</b> ${iconEmoji} ${entry.source}<br>` +
+                    `${entry.lat.toFixed(7)}, ${entry.lon.toFixed(7)}<br>` +
+                    `Alt: ${entry.alt.toFixed(1)}m · ${entry.time}`;
+    if (entry.status) {
+        popupHtml += `<br><b>Status:</b> ${entry.status.replace('_', ' ')}`;
+    }
+    if (entry.notes) {
+        popupHtml += `<br><i>${escapeHtml(entry.notes)}</i>`;
+    }
+    marker.bindPopup(popupHtml);
+}
+
+/**
+ * Render de log-lijst. Nieuwste bovenaan. Source-icoon links, status-badge
+ * inline naast tijd. Notitie als grijze italic onder de regel.
  */
 function updateLogDisplay() {
     const container = document.getElementById('coord-log');
@@ -72,7 +203,7 @@ function updateLogDisplay() {
 
     if (coordLog.length === 0) {
         container.innerHTML =
-            '<div class="coord-empty">Klik "📌 Log Positie" om coördinaten op te slaan</div>';
+            '<div class="coord-empty">Klik "📌 Log Positie" of klik op de kaart om coördinaten op te slaan</div>';
         return;
     }
 
@@ -80,11 +211,27 @@ function updateLogDisplay() {
     for (let i = coordLog.length - 1; i >= 0; i--) {
         const e = coordLog[i];
         const gmapsUrl = `https://www.google.com/maps?q=${e.lat},${e.lon}`;
+        const sourceIcon = e.source === 'drone' ? '🚁' : '📍';
+
+        let statusBadge = '';
+        if (e.status) {
+            statusBadge = `<span class="coord-status status-${e.status}">${e.status.replace('_', ' ')}</span>`;
+        }
+
         html += `
         <div class="coord-entry">
-            <span class="coord-time">#${i+1} ${e.time}</span>
-            <span class="coord-value" onclick="copyCoord(${i})" title="Klik om te kopiëren">${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}</span>
-            <span class="coord-alt">${e.alt.toFixed(1)}m</span>
+            <div style="flex:1; min-width:0;">
+                <div style="display:flex; align-items:center; gap:4px;">
+                    <span class="coord-source">${sourceIcon}</span>
+                    <span class="coord-time">#${i+1} ${e.time}</span>
+                    ${statusBadge}
+                </div>
+                <div style="margin-top:3px;">
+                    <span class="coord-value" onclick="copyCoord(${i})" title="Klik om te kopiëren">${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}</span>
+                    <span class="coord-alt"> · ${e.alt.toFixed(1)}m</span>
+                </div>
+                ${e.notes ? `<div class="coord-notes">${escapeHtml(e.notes)}</div>` : ''}
+            </div>
             <div class="coord-actions">
                 <button class="coord-btn" onclick="copyCoord(${i})" title="Kopieer">📋</button>
                 <a class="coord-btn" href="${gmapsUrl}" target="_blank" title="Open in Google Maps">🗺️</a>
@@ -95,9 +242,15 @@ function updateLogDisplay() {
 }
 
 /**
- * Kopieer "lat, lon" naar clipboard. Fallback voor browsers zonder
- * clipboard API (oude Chrome op Pi, sommige veldlaptops zonder HTTPS).
+ * Simpele HTML-escape voor notitie-content (voorkomt XSS bij eventuele
+ * externe data-import later).
  */
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 function copyCoord(index) {
     const e = coordLog[index];
     const text = `${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}`;
@@ -111,10 +264,6 @@ function copyCoord(index) {
     }
 }
 
-/**
- * Fallback clipboard via verborgen textarea + execCommand.
- * Werkt op http:// en oudere browsers waar Clipboard API geblokkeerd is.
- */
 function fallbackCopy(text) {
     const ta = document.createElement('textarea');
     ta.value = text;
@@ -125,19 +274,23 @@ function fallbackCopy(text) {
     window.showToast(`📋 Gekopieerd: ${text}`);
 }
 
-/** Wis alle gelogde punten na bevestiging. Pins op kaart blijven staan. */
 function clearLog() {
     if (coordLog.length === 0) return;
-    if (confirm('Alle gelogde coördinaten wissen?')) {
+    if (confirm('Alle gelogde coördinaten wissen?\n\nDit verwijdert ze permanent (ook na refresh).')) {
+        // Verwijder markers van de kaart
+        const map = window.getCurrentMap();
+        logMarkers.forEach(m => map.removeLayer(m));
+        logMarkers = [];
+
         coordLog = [];
+        saveCoordLogToStorage();
         updateLogDisplay();
         window.showToast('Log gewist');
     }
 }
 
 /**
- * Download alle gelogde punten als CSV met Google Maps links.
- * Filename: hornet_tracker_log_YYYY-MM-DD.csv
+ * CSV-export. Nieuwe kolommen: source, status, notes.
  */
 function exportLog() {
     if (coordLog.length === 0) {
@@ -145,10 +298,13 @@ function exportLog() {
         return;
     }
 
-    let csv = 'nr,tijd,datum,latitude,longitude,altitude_m,google_maps_link\n';
+    let csv = 'nr,tijd,datum,bron,status,latitude,longitude,altitude_m,notitie,google_maps_link\n';
     coordLog.forEach((e, i) => {
-        csv += `${i+1},${e.time},${e.date},${e.lat.toFixed(7)},${e.lon.toFixed(7)},` +
-               `${e.alt.toFixed(1)},https://www.google.com/maps?q=${e.lat},${e.lon}\n`;
+        // Quotes om notitie zodat komma's in vrije tekst niet de CSV breken
+        const safeNotes = '"' + (e.notes || '').replace(/"/g, '""') + '"';
+        csv += `${i+1},${e.time},${e.date},${e.source},${e.status || ''},` +
+               `${e.lat.toFixed(7)},${e.lon.toFixed(7)},${e.alt.toFixed(1)},` +
+               `${safeNotes},https://www.google.com/maps?q=${e.lat},${e.lon}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -162,8 +318,12 @@ function exportLog() {
 }
 
 // Expose op window
-window.logCoordinate   = logCoordinate;
+window.logCoordinate    = logCoordinate;
+window.handleMapClick   = handleMapClick;
+window.openLogModal     = openLogModal;
+window.confirmLogEntry  = confirmLogEntry;
 window.updateLogDisplay = updateLogDisplay;
-window.copyCoord       = copyCoord;
-window.clearLog        = clearLog;
-window.exportLog       = exportLog;
+window.copyCoord        = copyCoord;
+window.clearLog         = clearLog;
+window.exportLog        = exportLog;
+window.loadCoordLogFromStorage = loadCoordLogFromStorage;

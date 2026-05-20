@@ -96,7 +96,14 @@ function initMap() {
     // Lege trail polyline (gevuld zodra fix binnenkomt)
     trailLine = L.polyline([], { color: '#f5a623', weight: 3, opacity: 0.7 }).addTo(map);
 
+
+    // Klik op kaart = manual pin flow (delegeert naar coord-log.js)
+    map.on('click', function(e) {
+        window.handleMapClick(e.latlng);
+    });
+
     console.log('[map] Geinitialiseerd op fallback locatie (Brussel)');
+
 }
 
 /**
