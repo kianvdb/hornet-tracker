@@ -233,7 +233,7 @@
                     <button class="btn btn-small" onclick="logCoordinate()">📌 Log Positie</button>
                     <button class="btn btn-small btn-secondary" onclick="toggleTrail()">🔄 Trail aan/uit</button>
                     <button class="btn btn-small btn-secondary" onclick="centerMap()">🎯 Centreer</button>
-                    <button class="btn btn-small btn-secondary" onclick="exportLog()">💾 Export CSV</button>
+                    <button class="btn btn-small btn-secondary" onclick="exportLog()">📊 Export Excel</button>
                 </div>
             </div>
 
@@ -318,6 +318,38 @@
             <div class="btn-group" style="justify-content: flex-end;">
                 <button class="btn btn-secondary" onclick="cancelLogEntry()">Annuleren</button>
                 <button class="btn btn-success" onclick="confirmLogEntry()">Opslaan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export modal: kies welke entries te downloaden -->
+    <div class="modal" id="export-modal">
+        <div class="modal-content" style="min-width: 480px; max-width: 600px; text-align: left;">
+            <h3>📊 Logs exporteren naar Excel</h3>
+
+            <div style="color:#aaa; font-size:0.9em; margin-bottom:14px;">
+                Selecteer welke entries je wil downloaden.
+            </div>
+
+            <!-- Selecteer alles toggle -->
+            <div class="export-select-all">
+                <label>
+                    <input type="checkbox" id="export-select-all" onchange="toggleSelectAllExport()">
+                    <span><strong>Alles selecteren</strong></span>
+                </label>
+                <span class="export-counter" id="export-counter">0 van 0 geselecteerd</span>
+            </div>
+
+            <!-- Scrollbare lijst met alle entries -->
+            <div class="export-entries" id="export-entries">
+                <!-- gevuld door buildExportList() -->
+            </div>
+
+            <div class="btn-group" style="justify-content: flex-end; margin-top: 14px;">
+                <button class="btn btn-secondary" onclick="hideModals()">Annuleren</button>
+                <button class="btn btn-success" id="export-confirm-btn" onclick="confirmExport()" disabled>
+                    Download Excel
+                </button>
             </div>
         </div>
     </div>
