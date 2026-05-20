@@ -298,10 +298,15 @@ maken.
 > opgelost in de geplande `feature/offline-tiles` branch (vendored
 > Leaflet library + pre-cached tiles voor België).
 >
-> **Excel-downloads via HTTP worden door moderne browsers (Chrome/Edge)
-> als "onveilig" gemarkeerd.** Operator moet eenmalig op "Behouden"
-> klikken. Wordt opgelost in de geplande `feature/https-self-signed`
-> branch door een lokaal self-signed certificaat te genereren.
+> **Excel-downloads via HTTP**: moderne browsers markeren xlsx-downloads
+> van HTTP-bronnen als "onveilig" en blokkeren ze met een
+> bevestigingsdialoog. Operator klikt eenmalig "Behouden" in de
+> download-balk. Self-signed HTTPS-certificaten zijn geprobeerd maar
+> bleken in de praktijk omslachtiger (cert-waarschuwing per device, per
+> URL, met onbetrouwbare click-through) dan de huidige "Behouden"-klik.
+> Voor productiegebruik door een bestrijders-instantie zou een echt
+> TLS-certificaat van een publieke CA nodig zijn op een publiek domein,
+> buiten scope van deze thesis.
 
 ---
 
@@ -347,9 +352,6 @@ feature inzoomen op de chronologie van een onderdeel.
 
 - `feature/offline-tiles` — vendor Leaflet + pre-cached
   OpenStreetMap-tiles voor België zodat dashboard werkt zonder internet
-- `feature/https-self-signed` — lokaal TLS-certificaat voor de Pi zodat
-  Excel-downloads en andere HTTPS-only browser-APIs zonder
-  waarschuwingen werken
 - `feature/log-backend-persistence` — log opslaan in SQLite of JSON op
   de Pi i.p.v. alleen browser-localStorage; voorbereiding voor
   toekomstige bestrijders-platform sync
@@ -423,8 +425,6 @@ incrementele stap zonder dependencies te hoeven introduceren.
 - MLX90640 warmtecamera integratie via I2C (Pimoroni 55° onderweg)
 - Ra-01 LoRa-pakketdecodering ter vervanging van RTL-SDR energy detection
 - Offline kaart-tiles voor echt veldgebruik zonder internet
-- Self-signed HTTPS-certificaat zodat Excel-downloads en andere
-  HTTPS-only browser-APIs zonder browser-waarschuwingen werken
 - Backend-persistentie voor log (SQLite of JSON op de Pi)
 - Layout-finetuning na thermal- en LoRa-integratie zodat alle cards
   exact passen op 1920 × 1080 zonder scrollen
