@@ -19,7 +19,8 @@ Kalibratie van beacon v2 (zie beacon.ino):
   - SF9, BW 125 kHz, 433 MHz, ~200ms time-on-air, elke 500ms
 """
 
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request, send_file
+import io
 from flask_socketio import SocketIO
 import subprocess
 import threading
@@ -451,6 +452,157 @@ def index():
 @app.route('/api/status')
 def get_status():
     return jsonify(status)
+
+
+@app.route('/api/export-xlsx', methods=['POST'])
+def export_xlsx():
+    """
+    Genereer een gestileerd Excel-bestand uit een lijst log-entries.
+
+    Frontend POST't JSON met:
+      {
+        "entries": [
+          {"lat": ..., "lon": ..., "alt": ..., "time": ..., "date": ...,
+           "source": "drone"|"manueel", "status": "...", "notes": "..."},
+          ...
+        ],
+        "filename": "vespatrack_log_20-05-2026_17h30.xlsx"
+      }
+
+    Returns het XLSX-bestand als binary download.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    payload = request.get_json(silent=True) or {}
+    entries = payload.get('entries', [])
+    filename = payload.get('filename', 'vespatrack_log.xlsx')
+
+    # --- Workbook + sheet aanmaken ---
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Hornet log"
+
+    # --- Headers definiëren ---
+    headers = [
+        '#', 'Tijd', 'Datum', 'Bron', 'Status',
+        'Latitude', 'Longitude', 'Hoogte (m)', 'Notitie', 'Google Maps'
+    ]
+
+    # --- Header-stijl: vet wit op donkerblauw, gecentreerd ---
+    header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFFFF')
+    header_fill = PatternFill(start_color='FF16213E', end_color='FF16213E', fill_type='solid')
+    header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    thin_border = Border(
+        left=Side(style='thin', color='FFCCCCCC'),
+        right=Side(style='thin', color='FFCCCCCC'),
+        top=Side(style='thin', color='FFCCCCCC'),
+        bottom=Side(style='thin', color='FFCCCCCC')
+    )
+
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+
+    ws.row_dimensions[1].height = 28
+
+    # --- Status-kleuren (afgestemd op dashboard CSS) ---
+    status_fills = {
+        'gemeld':           PatternFill(start_color='FFE5E7EB', end_color='FFE5E7EB', fill_type='solid'),
+        'wordt_onderzocht': PatternFill(start_color='FFFEF3C7', end_color='FFFEF3C7', fill_type='solid'),
+        'waargenomen':      PatternFill(start_color='FFD1FAE5', end_color='FFD1FAE5', fill_type='solid'),
+        'bestreden':        PatternFill(start_color='FFA7F3D0', end_color='FFA7F3D0', fill_type='solid'),
+        'vals_alarm':       PatternFill(start_color='FFE5E7EB', end_color='FFE5E7EB', fill_type='solid'),
+    }
+    status_labels = {
+        'gemeld':           'Gemeld',
+        'wordt_onderzocht': 'Wordt onderzocht',
+        'waargenomen':      'Waargenomen',
+        'bestreden':        'Bestreden',
+        'vals_alarm':       'Vals alarm',
+        '':                 '',
+    }
+    source_labels = {
+        'drone':   '🚁 drone',
+        'manueel': '📍 manueel',
+    }
+
+    # --- Data rows ---
+    for row_idx, e in enumerate(entries, start=2):
+        lat = float(e.get('lat', 0))
+        lon = float(e.get('lon', 0))
+        alt = float(e.get('alt', 0))
+        gmaps_url = f"https://www.google.com/maps?q={lat},{lon}"
+        status = e.get('status', '')
+        source = e.get('source', '')
+
+        ws.cell(row=row_idx, column=1, value=row_idx - 1)
+        ws.cell(row=row_idx, column=2, value=e.get('time', ''))
+        ws.cell(row=row_idx, column=3, value=e.get('date', ''))
+        ws.cell(row=row_idx, column=4, value=source_labels.get(source, source))
+        ws.cell(row=row_idx, column=5, value=status_labels.get(status, status))
+        ws.cell(row=row_idx, column=6, value=lat)
+        ws.cell(row=row_idx, column=7, value=lon)
+        ws.cell(row=row_idx, column=8, value=alt)
+        ws.cell(row=row_idx, column=9, value=e.get('notes', ''))
+
+        # Google Maps hyperlink
+        maps_cell = ws.cell(row=row_idx, column=10, value='Open in Maps')
+        maps_cell.hyperlink = gmaps_url
+        maps_cell.font = Font(color='FF0563C1', underline='single')
+
+        # Status-cel kleur
+        if status in status_fills:
+            ws.cell(row=row_idx, column=5).fill = status_fills[status]
+
+        # Borders + alignment voor alle cellen in deze rij
+        for col_idx in range(1, len(headers) + 1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.border = thin_border
+            if col_idx in (1, 2, 3, 4, 5, 6, 7, 8):
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            else:
+                cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+
+        # Lat/lon met 7 decimalen formatteren
+        ws.cell(row=row_idx, column=6).number_format = '0.0000000'
+        ws.cell(row=row_idx, column=7).number_format = '0.0000000'
+        ws.cell(row=row_idx, column=8).number_format = '0.00'
+
+    # --- Kolombreedtes ---
+    column_widths = {
+        1: 5,    # #
+        2: 11,   # Tijd
+        3: 24,   # Datum (ISO)
+        4: 14,   # Bron
+        5: 18,   # Status
+        6: 13,   # Latitude
+        7: 13,   # Longitude
+        8: 11,   # Hoogte
+        9: 35,   # Notitie
+        10: 16,  # Google Maps link
+    }
+    for col_idx, width in column_widths.items():
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    # --- Freeze panes (header rij vastzetten bij scroll) ---
+    ws.freeze_panes = 'A2'
+
+    # --- Schrijf naar in-memory buffer + stuur als download ---
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
 
 @socketio.on('connect')
 def handle_connect():

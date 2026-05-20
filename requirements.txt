@@ -3,3 +3,4 @@ flask-socketio
 pymavlink
 pyrtlsdr
 numpy
+openpyxl
