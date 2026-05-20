@@ -41,6 +41,7 @@
         window.registerCoreSocketHandlers();          // connect / disconnect / status_update
         window.registerCommandResultHandler();        // arm/disarm/mode feedback
         window.registerBaselineStatusHandler();       // baseline reset knop state
+        window.registerPopoverOutsideClick();  
 
         console.log('[main] Klaar.');
     });

@@ -1,0 +1,36 @@
+/**
+ * LAYOUT — overkoepelende dashboard grid
+ *
+ * Twee koloms layout zodat het hele dashboard zonder scrollen past
+ * op 1920x1080 (veldlaptop):
+ *
+ *   Linker kolom (40%): info & controls (signaal, besturing, thermal)
+ *   Rechter kolom (60%): visuele context (kaart, coord-log)
+ *
+ * Vervangt de oude .grid + .map-section structuur. Onder 1200px valt
+ * de layout terug op één kolom (zou niet voorkomen op veldlaptop maar
+ * houdt het werkbaar op kleinere schermen).
+ */
+
+.dashboard-layout {
+    display: grid;
+    grid-template-columns: minmax(360px, 2fr) minmax(500px, 3fr);
+    gap: 16px;
+    max-width: 1900px;
+    margin: 0 auto;
+    padding: 0 16px;
+    align-items: start;
+}
+
+.dashboard-col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;          /* sta toe dat de kolom krimpt */
+}
+
+@media (max-width: 1200px) {
+    .dashboard-layout {
+        grid-template-columns: 1fr;
+    }
+}

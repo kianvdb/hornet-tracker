@@ -1,133 +1,8 @@
 /* ============================================
-   CARDS — quick status strip (boven) + grid cards
+   CARDS — grid cards + status rows + status badges
    ============================================ */
 
-/* --- QUICK STATUS STRIP (3 cards boven het dashboard) --- */
-.quick-status {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 15px;
-    max-width: 1400px;
-    margin: 0 auto 20px auto;
-}
-
-.quick-card {
-    background: #16213e;
-    border-radius: 10px;
-    padding: 20px;
-    border: 2px solid #0f3460;
-    text-align: center;
-    transition: border-color 0.3s, box-shadow 0.3s;
-}
-
-/* Status-kleur varianten voor quick cards */
-.quick-card.status-good {
-    border-color: #4ade80;
-    box-shadow: 0 0 12px rgba(74, 222, 128, 0.25);
-}
-
-.quick-card.status-ok {
-    border-color: #f5a623;
-    box-shadow: 0 0 12px rgba(245, 166, 35, 0.25);
-}
-
-.quick-card.status-warn {
-    border-color: #fb923c;
-    box-shadow: 0 0 12px rgba(251, 146, 60, 0.3);
-}
-
-.quick-card.status-bad {
-    border-color: #f87171;
-    box-shadow: 0 0 14px rgba(248, 113, 113, 0.4);
-    animation: pulse-border 1.5s infinite;
-}
-
-@keyframes pulse-border {
-    0%, 100% { box-shadow: 0 0 14px rgba(248, 113, 113, 0.4); }
-    50%      { box-shadow: 0 0 24px rgba(248, 113, 113, 0.7); }
-}
-
-.quick-title {
-    font-size: 0.9em;
-    color: #aaa;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 10px;
-}
-
-.quick-big {
-    font-size: 2.3em;
-    font-weight: bold;
-    margin: 8px 0;
-    color: #eee;
-}
-
-.quick-sub {
-    font-size: 0.95em;
-    color: #aaa;
-    margin-top: 5px;
-}
-
-/* Signaal balkjes (gebruikt in quick cards voor wifi/SiK) */
-.signal-bars {
-    display: inline-flex;
-    gap: 3px;
-    align-items: flex-end;
-    height: 30px;
-    margin: 5px 0;
-}
-
-.signal-bars .bar {
-    width: 7px;
-    background: #0f3460;
-    border-radius: 2px;
-    transition: background 0.3s;
-}
-
-.signal-bars .bar:nth-child(1) { height: 25%; }
-.signal-bars .bar:nth-child(2) { height: 50%; }
-.signal-bars .bar:nth-child(3) { height: 75%; }
-.signal-bars .bar:nth-child(4) { height: 100%; }
-
-.signal-bars.bars-1 .bar:nth-child(1)      { background: #f87171; }
-.signal-bars.bars-2 .bar:nth-child(-n+2)   { background: #fb923c; }
-.signal-bars.bars-3 .bar:nth-child(-n+3)   { background: #f5a623; }
-.signal-bars.bars-4 .bar                   { background: #4ade80; }
-
-/* Batterij visual (in quick card) */
-.battery-visual {
-    display: inline-block;
-    width: 80px;
-    height: 35px;
-    border: 3px solid #eee;
-    border-radius: 4px;
-    position: relative;
-    margin: 5px 0;
-}
-
-.battery-visual::after {
-    content: '';
-    position: absolute;
-    right: -8px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 5px;
-    height: 15px;
-    background: #eee;
-    border-radius: 0 2px 2px 0;
-}
-
-.battery-fill {
-    height: 100%;
-    background: #4ade80;
-    border-radius: 2px;
-    transition: width 0.5s, background 0.3s;
-}
-
-.battery-fill.low      { background: #f5a623; }
-.battery-fill.critical { background: #f87171; }
-
-/* --- GRID met gewone cards (verbindingen, signal, drone status, etc.) --- */
+/* --- GRID met cards (signal, besturing, thermisch, etc.) --- */
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -163,7 +38,7 @@
 .status-label { color: #aaa; }
 .status-value { font-weight: bold; }
 
-/* Status badge voor armed/disarmed indicator */
+/* Status badge voor armed/disarmed indicator (Besturing card) */
 .status-badge {
     padding: 5px 15px;
     border-radius: 20px;
@@ -173,3 +48,35 @@
 
 .armed    { background: #dc2626 !important; }
 .disarmed { background: #4ade80; }
+
+/* ============================================
+   SIGNAAL BALKJES
+   Gebruikt door navbar WiFi-indicator (zie navbar.css voor de
+   compacte navbar-variant). Base styling staat hier omdat het
+   patroon eventueel elders hergebruikt kan worden.
+   ============================================ */
+
+.signal-bars {
+    display: inline-flex;
+    gap: 3px;
+    align-items: flex-end;
+    height: 30px;
+    margin: 5px 0;
+}
+
+.signal-bars .bar {
+    width: 7px;
+    background: #0f3460;
+    border-radius: 2px;
+    transition: background 0.3s;
+}
+
+.signal-bars .bar:nth-child(1) { height: 25%; }
+.signal-bars .bar:nth-child(2) { height: 50%; }
+.signal-bars .bar:nth-child(3) { height: 75%; }
+.signal-bars .bar:nth-child(4) { height: 100%; }
+
+.signal-bars.bars-1 .bar:nth-child(1)    { background: #f87171; }
+.signal-bars.bars-2 .bar:nth-child(-n+2) { background: #fb923c; }
+.signal-bars.bars-3 .bar:nth-child(-n+3) { background: #f5a623; }
+.signal-bars.bars-4 .bar                 { background: #4ade80; }

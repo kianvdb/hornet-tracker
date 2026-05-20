@@ -16,168 +16,240 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/controls.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/thermal.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/navbar.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/layout.css') }}">
 </head>
-<body>
-    <h1>🐝 Hornet Tracker Dashboard</h1>
+<body class="has-navbar">
 
-    <!-- QUICK STATUS STRIP -->
-    <div class="quick-status">
-        <div class="quick-card" id="quick-battery">
-            <div class="quick-title">🔋 Batterij</div>
-            <div class="battery-visual">
-                <div class="battery-fill" id="battery-fill" style="width: 0%"></div>
-            </div>
-            <div class="quick-big" id="quick-battery-percent">--%</div>
-            <div class="quick-sub" id="quick-battery-voltage">-- V</div>
-        </div>
-        <div class="quick-card" id="quick-wifi">
-            <div class="quick-title">📡 Pi ↔ Grondstation</div>
-            <div class="signal-bars bars-0" id="wifi-bars">
-                <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
-            </div>
-            <div class="quick-big" id="quick-wifi-rssi">-- dBm</div>
-            <div class="quick-sub" id="quick-wifi-label">--</div>
-        </div>
-        <div class="quick-card" id="quick-telem">
-            <div class="quick-title">📶 SiK Telemetrie</div>
-            <div class="signal-bars bars-0" id="telem-bars">
-                <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
-            </div>
-            <div class="quick-big" id="quick-telem-rssi">-- dBm</div>
-            <div class="quick-sub" id="quick-telem-label">--</div>
-        </div>
-    </div>
-    
-    <!-- MAIN GRID -->
-    <div class="grid">
-        <div class="card">
-            <h2>📡 Verbindingen</h2>
-            <div class="status-row">
-                <span class="status-label">Raspberry Pi</span>
-                <span class="status-value" id="pi-status">--</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Pixhawk</span>
-                <span class="status-value" id="pixhawk-status">--</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">GPS Fix</span>
-                <span class="status-value" id="gps-status">--</span>
-            </div>
-            <div class="btn-group">
-                <button class="btn btn-secondary btn-small" onclick="showRebootModal()">🔄 Herstart Pi</button>
-                <button class="btn btn-danger btn-small" onclick="showShutdownModal()">⏻ Afsluiten</button>
-            </div>
-        </div>
-        
-        <div class="card">
-            <h2>📻 LoRa Signaal (433 MHz)</h2>
-            <div class="big-number" id="signal-delta">+0.0 dB</div>
-            <div class="signal-bar-container">
-                <div class="signal-bar" id="signal-bar" style="width: 0%"></div>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Power</span>
-                <span class="status-value" id="signal-power">-- dB</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Baseline</span>
-                <span>
-                    <span class="status-value" id="signal-baseline">-- dB</span>
-                    <button class="btn btn-small" id="reset-baseline-btn" onclick="resetBaseline()">Reset</button>
-                </span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Detectie</span>
-                <span class="status-value" id="signal-detected">--</span>
-            </div>
-        </div>
-        
-        <div class="card">
-            <h2>🚁 Drone Status</h2>
-            <div class="status-row">
-                <span class="status-label">Status</span>
-                <span id="armed-status" class="status-badge disarmed">DISARMED</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Flight Mode</span>
-                <span class="status-value" id="flight-mode">--</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Batterij</span>
-                <span class="status-value" id="battery">-- V</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Hoogte</span>
-                <span class="status-value" id="altitude">-- m</span>
-            </div>
-        </div>
+    <!-- ============================================
+         VASTE NAVBAR — status indicatoren + acties.
+         Vult zich op met data via socket-handlers.js (volgende commits).
+         ============================================ -->
+    <nav class="navbar">
+        <div class="navbar-title">🐝 VespaTrack</div>
 
-        <!-- DRONE CONTROLS -->
-        <div class="card">
-            <h2>🎮 Besturing</h2>
-            
-            <div style="display:flex;gap:10px;margin-bottom:15px;">
-                <button class="btn btn-success" id="btn-arm" onclick="armDrone()" style="flex:1;padding:12px;font-size:1.1em;">
-                    🔓 ARM
-                </button>
-                <button class="btn btn-danger" id="btn-disarm" onclick="disarmDrone()" style="flex:1;padding:12px;font-size:1.1em;">
-                    🔒 DISARM
-                </button>
-            </div>
+      <div class="navbar-status">
 
-            <div style="margin-bottom:12px;">
-                <span class="status-label" style="display:block;margin-bottom:6px;">Flight Mode</span>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(0)">STABILIZE</button>
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(2)">ALT_HOLD</button>
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(5)">LOITER</button>
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(6)">RTL</button>
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(9)">LAND</button>
-                    <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(4)">GUIDED</button>
+            <!-- BATTERIJ -->
+            <div class="navbar-item" id="nav-battery" onclick="toggleNavPopover('battery-popover')">
+                <span class="navbar-item-icon">🔋</span>
+                <span class="navbar-item-value" id="nav-battery-percent">--%</span>
+                <span class="navbar-item-sub" id="nav-battery-voltage">-- V</span>
+
+                <!-- Popover met detail -->
+                <div class="navbar-popover" id="battery-popover">
+                    <div class="popover-title">Drone batterij</div>
+                    <div class="popover-row">
+                        <span>Percentage</span>
+                        <span id="pop-battery-percent">--%</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Voltage</span>
+                        <span id="pop-battery-voltage">-- V</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Pixhawk status</span>
+                        <span id="pop-pixhawk-status">--</span>
+                    </div>
+                    <div class="popover-hint">
+                        Pixhawk telemetrie via USB-TTL (TELEM2 @ 57600 baud)
+                    </div>
                 </div>
             </div>
 
-            <div id="command-feedback" style="font-size:0.85em;color:#aaa;min-height:20px;margin-top:8px;">
-                Klaar voor commando's
+            <!-- PI ↔ GRONDSTATION (WiFi hotspot) -->
+            <div class="navbar-item" id="nav-wifi" onclick="toggleNavPopover('wifi-popover')">
+                <span class="navbar-item-icon">📡</span>
+                <div class="signal-bars bars-0" id="nav-wifi-bars">
+                    <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                </div>
+                <span class="navbar-item-value" id="nav-wifi-rssi">-- dBm</span>
+                <span class="navbar-item-sub" id="nav-wifi-clients">0 clients</span>
+
+                <div class="navbar-popover" id="wifi-popover">
+                    <div class="popover-title">Pi ↔ Grondstation</div>
+                    <div class="popover-row">
+                        <span>RSSI</span>
+                        <span id="pop-wifi-rssi">-- dBm</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Kwaliteit</span>
+                        <span id="pop-wifi-label">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Verbonden clients</span>
+                        <span id="pop-wifi-clients">0</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Interface</span>
+                        <span id="pop-wifi-iface">wlan1</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>SSID</span>
+                        <span>HornetTracker</span>
+                    </div>
+                    <div class="popover-hint">
+                        Comfast MT7612U USB adapter met dual 6dBi antennes.
+                        Hotspot IP 192.168.4.1.
+                    </div>
+                </div>
             </div>
+            <!-- GPS FIX + HOOGTE -->
+            <div class="navbar-item" id="nav-gps" onclick="toggleNavPopover('gps-popover')">
+                <span class="navbar-item-icon">🛰️</span>
+                <span class="navbar-item-value" id="nav-gps-status">Geen fix</span>
+                <span class="navbar-item-sub" id="nav-gps-altitude"></span>
+
+                <div class="navbar-popover" id="gps-popover">
+                    <div class="popover-title">GPS &amp; positie</div>
+                    <div class="popover-row">
+                        <span>Pixhawk</span>
+                        <span id="pop-gps-pixhawk">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Fix status</span>
+                        <span id="pop-gps-fix">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Satellieten</span>
+                        <span id="pop-gps-sats">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Latitude</span>
+                        <span id="pop-gps-lat">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Longitude</span>
+                        <span id="pop-gps-lon">--</span>
+                    </div>
+                    <div class="popover-row">
+                        <span>Hoogte</span>
+                        <span id="pop-gps-alt">--</span>
+                    </div>
+                    <div class="popover-hint">
+                        u-blox GPS via Pixhawk. Minimaal 6 satellieten en
+                        fix-type 3D voor betrouwbare positie.
+                    </div>
+                </div>
+            </div>
+
         </div>
 
-        <div class="card">
-            <h2>🌡️ Thermisch Beeld</h2>
-            <div class="thermal-placeholder">MLX90640 (later)</div>
-        </div>
-    </div>
 
-    <!-- MAP + COORDINATE LOG -->
-    <div class="map-section">
-        <div class="map-card">
-            <h2>🗺️ Live Positie</h2>
-            <div id="gps-waiting-badge">⏳ Wachten op GPS fix...</div>
+       <div class="navbar-actions">
+            <button class="navbar-btn" onclick="showRebootModal()" title="Herstart Pi">
+                🔄 Herstart
+            </button>
+            <button class="navbar-btn navbar-btn-danger" onclick="showShutdownModal()" title="Pi afsluiten">
+                ⏻ Afsluiten
+            </button>
+        </div>
+    </nav>
+ 
+    <!-- DASHBOARD LAYOUT — 2 koloms voor no-scroll viewport -->
+    <div class="dashboard-layout">
+
+        <!-- LINKER KOLOM: info & controls -->
+        <div class="dashboard-col">
+
+            <div class="card">
+                <h2>📻 LoRa Signaal (433 MHz)</h2>
+                <div class="big-number" id="signal-delta">+0.0 dB</div>
+                <div class="signal-bar-container">
+                    <div class="signal-bar" id="signal-bar" style="width: 0%"></div>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Power</span>
+                    <span class="status-value" id="signal-power">-- dB</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Baseline</span>
+                    <span>
+                        <span class="status-value" id="signal-baseline">-- dB</span>
+                        <button class="btn btn-small" id="reset-baseline-btn" onclick="resetBaseline()">Reset</button>
+                    </span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Detectie</span>
+                    <span class="status-value" id="signal-detected">--</span>
+                </div>
+            </div>
+
+            <!-- DRONE CONTROLS -->
+            <div class="card">
+                <h2>🎮 Besturing</h2>
+
+                <!-- Armed status indicator (was vroeger in Drone Status card) -->
+                <div style="text-align:center; margin-bottom:15px;">
+                    <span id="armed-status" class="status-badge disarmed">DISARMED</span>
+                </div>
+
+                <div style="display:flex;gap:10px;margin-bottom:15px;">
+                    <button class="btn btn-success" id="btn-arm" onclick="armDrone()" style="flex:1;padding:12px;font-size:1.1em;">
+                        🔓 ARM
+                    </button>
+                    <button class="btn btn-danger" id="btn-disarm" onclick="disarmDrone()" style="flex:1;padding:12px;font-size:1.1em;">
+                        🔒 DISARM
+                    </button>
+                </div>
+
+                <div style="margin-bottom:12px;">
+                    <span class="status-label" style="display:block;margin-bottom:6px;">Flight Mode</span>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(0)">STABILIZE</button>
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(2)">ALT_HOLD</button>
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(5)">LOITER</button>
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(6)">RTL</button>
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(9)">LAND</button>
+                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(4)">GUIDED</button>
+                    </div>
+                </div>
+
+                <div id="command-feedback" style="font-size:0.85em;color:#aaa;min-height:20px;margin-top:8px;">
+                    Klaar voor commando's
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>🌡️ Thermisch Beeld</h2>
+                <div class="thermal-placeholder">MLX90640 (later)</div>
+            </div>
+
+        </div>
+
+        <!-- RECHTER KOLOM: visualisatie -->
+        <div class="dashboard-col">
+
+            <div class="map-card">
+                <h2>🗺️ Live Positie</h2>
+                <div id="gps-waiting-badge">⏳ Wachten op GPS fix...</div>
                 <div id="map"></div>
-            <div class="map-info">
-                <div>Lat: <span id="map-lat">--</span></div>
-                <div>Lon: <span id="map-lon">--</span></div>
-                <div>Alt: <span id="map-alt">--</span> m</div>
-                <div>Sats: <span id="map-sats">--</span></div>
+                <div class="map-info">
+                    <div>Lat: <span id="map-lat">--</span></div>
+                    <div>Lon: <span id="map-lon">--</span></div>
+                    <div>Alt: <span id="map-alt">--</span> m</div>
+                    <div>Sats: <span id="map-sats">--</span></div>
+                </div>
+                <div class="map-controls">
+                    <button class="btn btn-small" onclick="logCoordinate()">📌 Log Positie</button>
+                    <button class="btn btn-small btn-secondary" onclick="toggleTrail()">🔄 Trail aan/uit</button>
+                    <button class="btn btn-small btn-secondary" onclick="centerMap()">🎯 Centreer</button>
+                    <button class="btn btn-small btn-secondary" onclick="exportLog()">💾 Export CSV</button>
+                </div>
             </div>
-            <div class="map-controls">
-                <button class="btn btn-small" onclick="logCoordinate()">📌 Log Positie</button>
-                <button class="btn btn-small btn-secondary" onclick="toggleTrail()">🔄 Trail aan/uit</button>
-                <button class="btn btn-small btn-secondary" onclick="centerMap()">🎯 Centreer</button>
-                <button class="btn btn-small btn-secondary" onclick="exportLog()">💾 Export CSV</button>
+
+            <div class="map-card">
+                <h2>📌 Coördinaat Log</h2>
+                <div class="log-header">
+                    <span class="log-count" id="log-count">0 punten</span>
+                    <button class="btn btn-small btn-danger" onclick="clearLog()">Wissen</button>
+                </div>
+                <div class="coord-log" id="coord-log">
+                    <div class="coord-empty">Klik "📌 Log Positie" om coördinaten op te slaan</div>
+                </div>
             </div>
+
         </div>
-        <div class="map-card">
-            <h2>📌 Coördinaat Log</h2>
-            <div class="log-header">
-                <span class="log-count" id="log-count">0 punten</span>
-                <button class="btn btn-small btn-danger" onclick="clearLog()">Wissen</button>
-            </div>
-            <div class="coord-log" id="coord-log">
-                <div class="coord-empty">Klik "📌 Log Positie" om coördinaten op te slaan</div>
-            </div>
-        </div>
+
     </div>
 
 
@@ -255,6 +327,7 @@
     <script src="{{ url_for('static', filename='js/signal-display.js') }}"></script>
     <script src="{{ url_for('static', filename='js/socket-handlers.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modals.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>    
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

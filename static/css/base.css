@@ -21,6 +21,8 @@ h1 {
     text-align: center;
     color: #f5a623;
     margin-bottom: 20px;
+    font-size: 1.4em;
+    margin-top: 0;
 }
 
 /* Gedeelde status-kleuren (gebruikt door cards, navbar, signal, etc.) */
@@ -38,12 +40,4 @@ h1 {
     50%      { opacity: 0.5; }
 }
 
-/* ============================================
-   RESPONSIVE — mobile / smalle schermen
-   ============================================ */
-@media (max-width: 900px) {
-    .quick-status   { grid-template-columns: 1fr; }
-    .quick-big      { font-size: 1.8em; }
-    .map-section    { grid-template-columns: 1fr; }
-    #map            { height: 300px; }
-}
+
