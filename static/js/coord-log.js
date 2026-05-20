@@ -26,6 +26,8 @@ let coordLog = [];
 
 /** Pending entry tijdens modal-flow (wachten op operator confirm) */
 let pendingEntry = null;
+/** Index van entry die bewerkt wordt (null bij nieuwe entry) */
+let editingIndex = null;
 /** Houdt geplaatste markers bij zodat we ze later kunnen verwijderen */
 let logMarkers = [];
 /** Storage key voor localStorage persistence */
@@ -102,6 +104,47 @@ function handleMapClick(latlng) {
 }
 
 /**
+ * Open log-modal met bestaande entry voor bewerken.
+ * Verschilt van openLogModal in dat editingIndex wordt gezet zodat
+ * confirmLogEntry weet dat het een update is, geen toevoeging.
+ */
+function editCoord(index) {
+    const entry = coordLog[index];
+    if (!entry) return;
+
+    editingIndex = index;
+
+    // Hergebruik dezelfde modal-velden als bij nieuwe entry
+    pendingEntry = {
+        lat: entry.lat,
+        lon: entry.lon,
+        alt: entry.alt,
+        source: entry.source,
+        // defaultStatus wordt straks overschreven door de huidige status
+        defaultStatus: entry.status
+    };
+
+    // Titel + source-tekst aanpassen voor edit-context
+    const title  = document.getElementById('log-modal-title');
+    const source = document.getElementById('log-modal-source');
+    title.textContent  = '✏️ Entry bewerken (#' + (index + 1) + ')';
+    source.textContent = entry.source === 'drone'
+        ? 'Oorspronkelijk geplaatst op drone-positie'
+        : 'Oorspronkelijk handmatig geplaatst door operator';
+
+    // Coordinaten preview (read-only)
+    document.getElementById('log-modal-coords').textContent =
+        entry.lat.toFixed(7) + ', ' + entry.lon.toFixed(7);
+    document.getElementById('log-modal-alt').textContent = entry.alt.toFixed(1);
+
+    // Vul huidige status en notitie in
+    document.getElementById('log-modal-status').value = entry.status || '';
+    document.getElementById('log-modal-notes').value  = entry.notes  || '';
+
+    document.getElementById('log-modal').classList.add('show');
+}
+
+/**
  * Open de log-modal en vul defaults. Operator kiest status + notitie,
  * klikt opslaan → confirmLogEntry() persisteert.
  */
@@ -132,15 +175,38 @@ function openLogModal(data) {
 }
 
 /**
- * Opslaan-knop in log-modal. Bouwt entry, plaatst marker, sluit modal.
+ * Opslaan-knop in log-modal. Twee paden:
+ *  - editingIndex !== null  → update bestaande entry, marker-popup verversen
+ *  - editingIndex === null  → nieuwe entry toevoegen
  */
 function confirmLogEntry() {
     if (!pendingEntry) return;
 
     const status = document.getElementById('log-modal-status').value;
     const notes  = document.getElementById('log-modal-notes').value.trim();
-    const now    = new Date();
-    const time   = now.toLocaleTimeString('nl-BE', {
+
+    if (editingIndex !== null) {
+        // --- UPDATE bestaande entry ---
+        const entry = coordLog[editingIndex];
+        entry.status = status;
+        entry.notes  = notes;
+        // tijd/datum/lat/lon/source ongewijzigd — entry blijft historisch correct
+
+        // Vervang marker-popup met nieuwe inhoud
+        refreshMarkerPopup(editingIndex);
+
+        editingIndex  = null;
+        pendingEntry  = null;
+        window.hideModals();
+        updateLogDisplay();
+        saveCoordLogToStorage();
+        window.showToast(`✏️ Entry #${entry ? coordLog.indexOf(entry) + 1 : ''} bijgewerkt`);
+        return;
+    }
+
+    // --- NIEUWE entry ---
+    const now  = new Date();
+    const time = now.toLocaleTimeString('nl-BE', {
         hour: '2-digit', minute: '2-digit', second: '2-digit'
     });
 
@@ -156,8 +222,6 @@ function confirmLogEntry() {
     };
 
     coordLog.push(entry);
-
-    // Marker op kaart
     placeMarker(entry, coordLog.length);
 
     pendingEntry = null;
@@ -191,6 +255,28 @@ logMarkers.push(marker);
         popupHtml += `<br><i>${escapeHtml(entry.notes)}</i>`;
     }
     marker.bindPopup(popupHtml);
+}
+
+/**
+ * Update de popup-inhoud van een bestaande marker na een edit.
+ * Marker zelf hoeft niet vervangen — alleen de popup wordt herschreven.
+ */
+function refreshMarkerPopup(index) {
+    const marker = logMarkers[index];
+    if (!marker) return;
+    const entry = coordLog[index];
+    const iconEmoji = entry.source === 'drone' ? '🚁' : '📍';
+
+    let popupHtml = `<b>#${index + 1}</b> ${iconEmoji} ${entry.source}<br>` +
+                    `${entry.lat.toFixed(7)}, ${entry.lon.toFixed(7)}<br>` +
+                    `Alt: ${entry.alt.toFixed(1)}m · ${entry.time}`;
+    if (entry.status) {
+        popupHtml += `<br><b>Status:</b> ${entry.status.replace('_', ' ')}`;
+    }
+    if (entry.notes) {
+        popupHtml += `<br><i>${escapeHtml(entry.notes)}</i>`;
+    }
+    marker.setPopupContent(popupHtml);
 }
 
 /**
@@ -232,7 +318,8 @@ function updateLogDisplay() {
                 </div>
                 ${e.notes ? `<div class="coord-notes">${escapeHtml(e.notes)}</div>` : ''}
             </div>
-            <div class="coord-actions">
+        <div class="coord-actions">
+                <button class="coord-btn" onclick="editCoord(${i})" title="Bewerken">✏️</button>
                 <button class="coord-btn" onclick="copyCoord(${i})" title="Kopieer">📋</button>
                 <a class="coord-btn" href="${gmapsUrl}" target="_blank" title="Open in Google Maps">🗺️</a>
             </div>
@@ -317,6 +404,16 @@ function exportLog() {
     window.showToast('CSV geëxporteerd');
 }
 
+/**
+ * Annuleer de log-modal. Reset edit-state zodat een volgende open een
+ * nieuwe entry-flow start in plaats van per ongeluk in edit-modus te staan.
+ */
+function cancelLogEntry() {
+    editingIndex = null;
+    pendingEntry = null;
+    window.hideModals();
+}
+
 // Expose op window
 window.logCoordinate    = logCoordinate;
 window.handleMapClick   = handleMapClick;
@@ -327,3 +424,5 @@ window.copyCoord        = copyCoord;
 window.clearLog         = clearLog;
 window.exportLog        = exportLog;
 window.loadCoordLogFromStorage = loadCoordLogFromStorage;
+window.editCoord       = editCoord;
+window.cancelLogEntry  = cancelLogEntry;
