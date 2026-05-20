@@ -93,6 +93,8 @@ de Pixhawk.
   (GPS, batterij, mode, armed) én commando's sturen (arm/disarm/mode)
 - **RF-detectie** — pyrtlsdr met FFT-based energy detection, baseline
   + peak-hold detectie
+- **Excel-export** — openpyxl voor server-side generatie van
+  gestileerde XLSX-bestanden uit log-entries
 - **Frontend** — vanilla JavaScript (geen build-step), Leaflet voor de
   kaart, browser localStorage voor log-persistentie
 
@@ -127,6 +129,7 @@ flask-socketio
 pymavlink
 pyrtlsdr
 numpy
+openpyxl
 ```
 
 ### 3. Systemd service registreren
@@ -221,7 +224,8 @@ sudo journalctl -u hornet-tracker -f     # live logs volgen
 ```text
 hornet-tracker/
 ├── app.py                          Flask + Socket.io backend, MAVLink,
-│                                   RTL-SDR, WiFi status, command handlers
+│                                   RTL-SDR, WiFi status, command handlers,
+│                                   Excel-export endpoint
 ├── README.md                       dit bestand
 ├── requirements.txt                Python dependencies
 ├── .gitignore
@@ -240,19 +244,19 @@ hornet-tracker/
     │   ├── signal.css              LoRa signal card
     │   ├── map.css                 Leaflet kaart + GPS-waiting badge
     │   ├── coord-log.css           gelogde coördinaten + status badges + toast
-    │   ├── controls.css            knoppen + modals + log-formulier velden
+    │   ├── controls.css            knoppen + modals + log-formulier + export-modal
     │   └── thermal.css             warmtecamera (in voorbereiding)
     │
     └── js/                         modulaire JavaScript per concern
         ├── utils.js                rssi helpers, toast, card status
         ├── map.js                  Leaflet init, drone marker, trail, click-handler
         ├── coord-log.js            log entries, map-click pin, status/notitie,
-        │                           edit-flow, localStorage, CSV-export
+        │                           edit, delete, localStorage, Excel-export flow
         ├── drone-controls.js       arm/disarm/mode + command result handler
         ├── signal-display.js       LoRa signal card + baseline reset
         ├── navbar.js               popover toggle + click-outside-to-close
         ├── socket-handlers.js      connect/disconnect/status_update dispatch
-        ├── modals.js               shutdown/reboot/arm/log dialoogvensters
+        ├── modals.js               shutdown/reboot/arm/log/export dialoogvensters
         └── main.js                 bootstrap (socket + init + localStorage load)
 ```
 
@@ -263,7 +267,7 @@ hornet-tracker/
 1. `utils.js`, `map.js`, `coord-log.js`, `drone-controls.js`,
    `signal-display.js` — definiëren functies op `window`, geen socket nodig.
 2. `socket-handlers.js` — handlers die `window.socket` gebruiken.
-3. `modals.js` — dialog-logica voor shutdown/reboot/arm/log-modal.
+3. `modals.js` — dialog-logica voor shutdown/reboot/arm/log/export.
 4. `navbar.js` — popover open/sluit logica voor navbar-items.
 5. `main.js` — bootstrap: maakt de socket aan, laadt log uit localStorage,
    initialiseert alles na `DOMContentLoaded`.
@@ -293,6 +297,11 @@ maken.
 > verschijnt het dashboard wel maar blijft de kaart leeg. Dit wordt
 > opgelost in de geplande `feature/offline-tiles` branch (vendored
 > Leaflet library + pre-cached tiles voor België).
+>
+> **Excel-downloads via HTTP worden door moderne browsers (Chrome/Edge)
+> als "onveilig" gemarkeerd.** Operator moet eenmalig op "Behouden"
+> klikken. Wordt opgelost in de geplande `feature/https-self-signed`
+> branch door een lokaal self-signed certificaat te genereren.
 
 ---
 
@@ -325,6 +334,8 @@ feature inzoomen op de chronologie van een onderdeel.
   edit-flow, localStorage persistentie
 - `feature/drone-command-handlers` — server-side `arm_drone` /
   `disarm_drone` / `set_mode` handlers
+- `feature/xlsx-export` — gestileerde Excel-export met selectie-modal,
+  verwijder-knop per log-entry
 
 **Lopende (wacht op hardware):**
 
@@ -336,8 +347,9 @@ feature inzoomen op de chronologie van een onderdeel.
 
 - `feature/offline-tiles` — vendor Leaflet + pre-cached
   OpenStreetMap-tiles voor België zodat dashboard werkt zonder internet
-- `feature/xlsx-export` — gestileerde Excel-export ter vervanging van
-  losse CSV (relevant voor delen met bestrijders-instanties)
+- `feature/https-self-signed` — lokaal TLS-certificaat voor de Pi zodat
+  Excel-downloads en andere HTTPS-only browser-APIs zonder
+  waarschuwingen werken
 - `feature/log-backend-persistence` — log opslaan in SQLite of JSON op
   de Pi i.p.v. alleen browser-localStorage; voorbereiding voor
   toekomstige bestrijders-platform sync
@@ -394,17 +406,25 @@ incrementele stap zonder dependencies te hoeven introduceren.
   - vrije notitie per entry
   - source-tracking (drone vs manueel) met visuele iconen
   - bewerken van bestaande entries via potlood-knop
+  - verwijderen van individuele entries via prullenbak-knop
   - localStorage persistentie (overleeft browser-refresh)
-  - CSV-export met alle velden
   - Google Maps deeplinks
 - Server-side handlers voor `arm_drone` / `disarm_drone` / `set_mode`
+- Gestileerde Excel-export met:
+  - selectie-modal (operator kiest welke entries hij wil downloaden)
+  - "Alles selecteren" toggle in email-inbox stijl
+  - status-cellen ingekleurd per status
+  - klikbare Google Maps hyperlinks per entry
+  - bevroren header-rij bij scrollen
+  - bestandsnaam met Belgische datum-notatie
 
 ### In planning
 
 - MLX90640 warmtecamera integratie via I2C (Pimoroni 55° onderweg)
 - Ra-01 LoRa-pakketdecodering ter vervanging van RTL-SDR energy detection
 - Offline kaart-tiles voor echt veldgebruik zonder internet
-- Gestileerde XLSX-export ter vervanging van losse CSV
+- Self-signed HTTPS-certificaat zodat Excel-downloads en andere
+  HTTPS-only browser-APIs zonder browser-waarschuwingen werken
 - Backend-persistentie voor log (SQLite of JSON op de Pi)
 - Layout-finetuning na thermal- en LoRa-integratie zodat alle cards
   exact passen op 1920 × 1080 zonder scrollen

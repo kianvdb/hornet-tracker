@@ -322,6 +322,7 @@ function updateLogDisplay() {
                 <button class="coord-btn" onclick="editCoord(${i})" title="Bewerken">✏️</button>
                 <button class="coord-btn" onclick="copyCoord(${i})" title="Kopieer">📋</button>
                 <a class="coord-btn" href="${gmapsUrl}" target="_blank" title="Open in Google Maps">🗺️</a>
+                <button class="coord-btn coord-btn-danger" onclick="deleteCoord(${i})" title="Verwijderen">🗑️</button>
             </div>
         </div>`;
     }
@@ -361,6 +362,33 @@ function fallbackCopy(text) {
     window.showToast(`📋 Gekopieerd: ${text}`);
 }
 
+/**
+ * Verwijder één entry uit de log. Vraagt bevestiging, ruimt marker op,
+ * herrendert lijst, syncschrijft naar localStorage.
+ *
+ * Nummers van entries onder de verwijderde schuiven op (entry #3 wordt
+ * #2 enz). Dat is acceptabel voor visuele presentatie — voor een echte
+ * stabiele identificatie zou later een UUID per entry nodig zijn.
+ */
+function deleteCoord(index) {
+    if (index < 0 || index >= coordLog.length) return;
+    if (!confirm(`Entry #${index + 1} verwijderen?`)) return;
+
+    // Verwijder marker van kaart
+    const map = window.getCurrentMap();
+    if (logMarkers[index]) {
+        map.removeLayer(logMarkers[index]);
+    }
+    logMarkers.splice(index, 1);
+
+    // Verwijder entry uit array
+    coordLog.splice(index, 1);
+
+    saveCoordLogToStorage();
+    updateLogDisplay();
+    window.showToast('Entry verwijderd');
+}
+
 function clearLog() {
     if (coordLog.length === 0) return;
     if (confirm('Alle gelogde coördinaten wissen?\n\nDit verwijdert ze permanent (ook na refresh).')) {
@@ -377,31 +405,142 @@ function clearLog() {
 }
 
 /**
- * CSV-export. Nieuwe kolommen: source, status, notes.
+ * Toon export-modal met selectie-UI. Default: niets geselecteerd —
+ * operator kiest expliciet (email-inbox patroon).
  */
 function exportLog() {
     if (coordLog.length === 0) {
-        window.showToast('Geen data om te exporteren');
+        window.showToast('Geen entries om te exporteren');
+        return;
+    }
+    buildExportList();
+    document.getElementById('export-modal').classList.add('show');
+}
+
+/**
+ * Bouw de selectie-lijst in de export-modal. Wordt opnieuw aangeroepen
+ * bij elke modal-open zodat nieuwe entries verschijnen en gewijzigde
+ * statussen bijgewerkt zijn.
+ */
+function buildExportList() {
+    const container = document.getElementById('export-entries');
+    document.getElementById('export-select-all').checked = false;
+
+    let html = '';
+    for (let i = 0; i < coordLog.length; i++) {
+        const e = coordLog[i];
+        const sourceIcon = e.source === 'drone' ? '🚁' : '📍';
+        const statusLabel = e.status ? e.status.replace('_', ' ') : '—';
+
+        html += `
+        <label class="export-entry">
+            <input type="checkbox" class="export-checkbox"
+                   data-index="${i}" onchange="updateExportCounter()">
+            <div class="export-entry-content">
+                <div class="export-entry-line1">
+                    <span>${sourceIcon}</span>
+                    <span><strong>#${i+1}</strong> · ${e.time} · ${statusLabel}</span>
+                </div>
+                <div class="export-entry-line2">
+                    ${e.lat.toFixed(7)}, ${e.lon.toFixed(7)} · ${e.alt.toFixed(1)}m
+                </div>
+                ${e.notes ? `<div class="export-entry-notes">${escapeHtml(e.notes)}</div>` : ''}
+            </div>
+        </label>`;
+    }
+    container.innerHTML = html;
+    updateExportCounter();
+}
+
+/**
+ * Bijwerken van counter "X van Y geselecteerd" + enable/disable van
+ * download-knop. Wordt aangeroepen bij elke checkbox-wijziging.
+ */
+function updateExportCounter() {
+    const checkboxes = document.querySelectorAll('.export-checkbox');
+    const checked = document.querySelectorAll('.export-checkbox:checked');
+    const total = checkboxes.length;
+    const selected = checked.length;
+
+    document.getElementById('export-counter').textContent =
+        `${selected} van ${total} geselecteerd`;
+    document.getElementById('export-confirm-btn').disabled = (selected === 0);
+
+    // Sync "Alles selecteren" checkbox met huidige toestand
+    const selectAll = document.getElementById('export-select-all');
+    selectAll.checked = (selected === total && total > 0);
+}
+
+/**
+ * Wanneer "Alles selecteren" wordt aan- of uitgevinkt, propageer naar
+ * alle entry-checkboxes.
+ */
+function toggleSelectAllExport() {
+    const checked = document.getElementById('export-select-all').checked;
+    document.querySelectorAll('.export-checkbox').forEach(cb => {
+        cb.checked = checked;
+    });
+    updateExportCounter();
+}
+
+/**
+ * Verzamel geselecteerde entries en POST naar backend voor XLSX-generatie.
+ * Bestand wordt door browser gedownload via blob-URL met Belgische datum
+ * in de bestandsnaam.
+ */
+async function confirmExport() {
+    const indices = Array.from(document.querySelectorAll('.export-checkbox:checked'))
+        .map(cb => parseInt(cb.dataset.index, 10));
+
+    if (indices.length === 0) {
+        window.showToast('Geen entries geselecteerd');
         return;
     }
 
-    let csv = 'nr,tijd,datum,bron,status,latitude,longitude,altitude_m,notitie,google_maps_link\n';
-    coordLog.forEach((e, i) => {
-        // Quotes om notitie zodat komma's in vrije tekst niet de CSV breken
-        const safeNotes = '"' + (e.notes || '').replace(/"/g, '""') + '"';
-        csv += `${i+1},${e.time},${e.date},${e.source},${e.status || ''},` +
-               `${e.lat.toFixed(7)},${e.lon.toFixed(7)},${e.alt.toFixed(1)},` +
-               `${safeNotes},https://www.google.com/maps?q=${e.lat},${e.lon}\n`;
-    });
+    const selectedEntries = indices.map(i => coordLog[i]);
+    const filename = buildExportFilename();
 
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `hornet_tracker_log_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    window.showToast('CSV geëxporteerd');
+    try {
+        const response = await fetch('/api/export-xlsx', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entries: selectedEntries, filename: filename })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.status}`);
+        }
+
+        // Trigger browser-download van de binary blob
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        window.hideModals();
+        window.showToast(`📊 Excel met ${indices.length} entries gedownload`);
+
+    } catch (err) {
+        console.error('Export error:', err);
+        window.showToast('Excel-export mislukt: ' + err.message);
+    }
+}
+
+/**
+ * Bouw bestandsnaam in Belgische datum-notatie:
+ *   vespatrack_log_20-05-2026_17h30.xlsx
+ */
+function buildExportFilename() {
+    const now = new Date();
+    const dd = String(now.getDate()).padStart(2, '0');
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const yyyy = now.getFullYear();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    return `vespatrack_log_${dd}-${mm}-${yyyy}_${hh}h${min}.xlsx`;
 }
 
 /**
@@ -426,3 +565,8 @@ window.exportLog        = exportLog;
 window.loadCoordLogFromStorage = loadCoordLogFromStorage;
 window.editCoord       = editCoord;
 window.cancelLogEntry  = cancelLogEntry;
+window.buildExportList         = buildExportList;
+window.updateExportCounter     = updateExportCounter;
+window.toggleSelectAllExport   = toggleSelectAllExport;
+window.confirmExport           = confirmExport;
+window.deleteCoord = deleteCoord;
