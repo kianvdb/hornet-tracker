@@ -72,6 +72,24 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 LOG_FILE = os.path.join(DATA_DIR, 'coord-log.json')
 log_lock = threading.Lock()
 
+# --- Tile cache ---
+# Map waar offline tiles worden opgeslagen, gestructureerd als
+#   data/tiles/<source>/<z>/<x>/<y>.png
+# Twee sources: 'osm' (OpenStreetMap stratenplan) en 'sat' (ArcGIS satelliet)
+TILE_CACHE_DIR = os.path.join(DATA_DIR, 'tiles')
+
+# Externe tile-servers — gebruikt als fallback bij cache-miss met internet.
+# {z}/{x}/{y} placeholders worden vervangen door python format string.
+TILE_SOURCES = {
+    'osm': 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    'sat': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    # NB: ArcGIS gebruikt {z}/{y}/{x} (omgekeerde volgorde), niet typo
+}
+
+# User-agent vereist door OSM tile-server policy. Beleefd identificeren
+# voorkomt dat ze ons IP blokkeren bij prefetch van veel tiles.
+TILE_USER_AGENT = 'VespaTrack/1.0 (bachelorthesis Erasmushogeschool Brussel)'
+
 # ============================================
 # FLASK APP
 # ============================================
@@ -193,6 +211,71 @@ def generate_entry_id():
     timestamp_ms = int(time.time() * 1000)
     random_hex = secrets.token_hex(2)
     return f"{timestamp_ms}-{random_hex}"
+
+
+    # ============================================
+# TILE CACHE (offline maps)
+# ============================================
+#
+# Tiles worden lokaal opgeslagen onder data/tiles/<source>/<z>/<x>/<y>.png.
+# De serve_tile route hierboven probeert eerst lokaal, valt terug op
+# internet wanneer een tile niet gecached is.
+#
+# Atomic writes: download naar .tmp, dan os.replace zodat een crashed
+# download geen corrupte PNG achterlaat.
+
+def tile_cache_path(source, z, x, y):
+    """Bouw het filesystem-pad voor een tile in onze cache."""
+    return os.path.join(TILE_CACHE_DIR, source, str(z), str(x), f"{y}.png")
+
+
+def fetch_tile_from_internet(source, z, x, y):
+    """
+    Haal een tile op bij de externe tile-server. Returns (bytes, content_type)
+    of (None, None) bij fout (netwerk, 404, blokkering).
+
+    Slaat het resultaat NIET zelf op — dat doet de aanroeper, zodat
+    fetch en cache-write apart te debuggen zijn.
+    """
+    import urllib.request
+    import urllib.error
+
+    if source not in TILE_SOURCES:
+        return None, None
+
+    url = TILE_SOURCES[source].format(z=z, x=x, y=y)
+    req = urllib.request.Request(url, headers={'User-Agent': TILE_USER_AGENT})
+
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = response.read()
+            content_type = response.headers.get('Content-Type', 'image/png')
+            return data, content_type
+    except urllib.error.URLError as e:
+        # Netwerk down, geen internet, of tile server unreachable
+        print(f"[tiles] fetch failed {source}/{z}/{x}/{y}: {e}")
+        return None, None
+    except Exception as e:
+        print(f"[tiles] unexpected error {source}/{z}/{x}/{y}: {e}")
+        return None, None
+
+
+def save_tile_to_cache(source, z, x, y, data):
+    """
+    Schrijf een tile atomisch naar de cache. Maakt parent-directories aan
+    indien nodig. Returns True bij succes.
+    """
+    path = tile_cache_path(source, z, x, y)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp_path = path + '.tmp'
+        with open(tmp_path, 'wb') as f:
+            f.write(data)
+        os.replace(tmp_path, path)
+        return True
+    except IOError as e:
+        print(f"[tiles] save failed {source}/{z}/{x}/{y}: {e}")
+        return False
 
 
 # ============================================
@@ -791,6 +874,87 @@ def api_log_clear():
     if save_log([]):
         return '', 204
     return jsonify({'error': 'opslaan mislukt'}), 500
+
+    # ============================================
+# TILE ROUTE — lokaal-eerst, internet-fallback
+# ============================================
+
+@app.route('/tiles/<source>/<int:z>/<int:x>/<int:y>.png')
+def serve_tile(source, z, x, y):
+    """
+    Lever een map-tile aan de browser. Twee stappen:
+
+      1. Probeer uit lokale cache (data/tiles/...)
+      2. Bij cache-miss: download van externe server, sla op in cache,
+         lever aan browser
+
+    Bij geen internet en geen cache: 404. Frontend Leaflet behandelt
+    dit als "tile niet beschikbaar" en toont een grijs vlak.
+    """
+    if source not in TILE_SOURCES:
+        return jsonify({'error': f'onbekende source: {source}'}), 400
+
+    # 1. Cache check
+    path = tile_cache_path(source, z, x, y)
+    if os.path.exists(path):
+        # Detecteer JPEG-magic-bytes (ArcGIS levert JPEG) vs PNG
+        with open(path, 'rb') as f:
+            magic = f.read(3)
+        mime = 'image/jpeg' if magic[:3] == b'\xff\xd8\xff' else 'image/png'
+        return send_file(path, mimetype=mime)
+
+    # 2. Cache miss — probeer internet
+    data, content_type = fetch_tile_from_internet(source, z, x, y)
+    if data is None:
+        # Geen internet of tile niet bestaand op server
+        return '', 404
+
+    # Sla op voor toekomstig gebruik (best-effort, faal stil als disk vol)
+    save_tile_to_cache(source, z, x, y, data)
+
+    # Lever direct aan browser zonder een tweede disk-read
+    return data, 200, {'Content-Type': content_type}
+
+
+@app.route('/api/tiles/stats')
+def api_tile_stats():
+    """
+    Statistieken over de tile cache: aantal tiles per source, totale
+    disk-grootte. Wordt door dashboard gebruikt om operator te informeren
+    hoeveel offline-kaart-data lokaal beschikbaar is.
+    """
+    stats = {}
+    if not os.path.exists(TILE_CACHE_DIR):
+        return jsonify({'sources': {}, 'total_bytes': 0, 'total_count': 0})
+
+    total_bytes = 0
+    total_count = 0
+
+    for source in TILE_SOURCES.keys():
+        source_dir = os.path.join(TILE_CACHE_DIR, source)
+        if not os.path.exists(source_dir):
+            stats[source] = {'count': 0, 'bytes': 0}
+            continue
+
+        count = 0
+        size = 0
+        for root, dirs, files in os.walk(source_dir):
+            for f in files:
+                if f.endswith('.png'):
+                    count += 1
+                    try:
+                        size += os.path.getsize(os.path.join(root, f))
+                    except OSError:
+                        pass
+        stats[source] = {'count': count, 'bytes': size}
+        total_bytes += size
+        total_count += count
+
+    return jsonify({
+        'sources': stats,
+        'total_bytes': total_bytes,
+        'total_count': total_count,
+    })
 
 @socketio.on('connect')
 def handle_connect():

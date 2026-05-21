@@ -8,3 +8,6 @@ venv/
 
 # Runtime data — persistente log entries, niet in git
 data/coord-log.json
+
+# Tile cache — locally generated PNG bestanden, niet in git
+data/tiles/
