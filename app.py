@@ -83,6 +83,7 @@ TILE_CACHE_DIR = os.path.join(DATA_DIR, 'tiles')
 TILE_SOURCES = {
     'osm': 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     'sat': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    'hyb': 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
     # NB: ArcGIS gebruikt {z}/{y}/{x} (omgekeerde volgorde), niet typo
 }
 
