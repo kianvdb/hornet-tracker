@@ -28,7 +28,7 @@ function showRebootModal() {
  * Wordt aangeroepen bij annuleren, bij succes-OK, en bij socket reconnect.
  */
 function hideModals() {
-    ['shutdown-modal', 'reboot-modal', 'countdown-modal', 'success-modal', 'arm-modal', 'log-modal', 'export-modal']
+    ['shutdown-modal', 'reboot-modal', 'countdown-modal', 'success-modal', 'arm-modal', 'log-modal', 'export-modal', 'tile-cache-modal']
         .forEach(id => document.getElementById(id).classList.remove('show'));
 
     if (countdownInterval) {

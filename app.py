@@ -22,6 +22,7 @@ Kalibratie van beacon v2 (zie beacon.ino):
 from flask import Flask, render_template, jsonify, request, send_file
 import io
 import json
+import math
 from flask_socketio import SocketIO
 import subprocess
 import threading
@@ -72,12 +73,31 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 LOG_FILE = os.path.join(DATA_DIR, 'coord-log.json')
 log_lock = threading.Lock()
 
+# --- Tile cache ---
+# Map waar offline tiles worden opgeslagen, gestructureerd als
+#   data/tiles/<source>/<z>/<x>/<y>.png
+# Twee sources: 'osm' (OpenStreetMap stratenplan) en 'sat' (ArcGIS satelliet)
+TILE_CACHE_DIR = os.path.join(DATA_DIR, 'tiles')
+
+# Externe tile-servers — gebruikt als fallback bij cache-miss met internet.
+# {z}/{x}/{y} placeholders worden vervangen door python format string.
+TILE_SOURCES = {
+    'osm': 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    'sat': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    'hyb': 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+    # NB: ArcGIS gebruikt {z}/{y}/{x} (omgekeerde volgorde), niet typo
+}
+
+# User-agent vereist door OSM tile-server policy. Beleefd identificeren
+# voorkomt dat ze ons IP blokkeren bij prefetch van veel tiles.
+TILE_USER_AGENT = 'VespaTrack/1.0 (bachelorthesis Erasmushogeschool Brussel)'
+
 # ============================================
 # FLASK APP
 # ============================================
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'hornet-tracker-secret'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 status = {
     'signal_power': -100,
@@ -193,6 +213,170 @@ def generate_entry_id():
     timestamp_ms = int(time.time() * 1000)
     random_hex = secrets.token_hex(2)
     return f"{timestamp_ms}-{random_hex}"
+
+
+    # ============================================
+# TILE CACHE (offline maps)
+# ============================================
+#
+# Tiles worden lokaal opgeslagen onder data/tiles/<source>/<z>/<x>/<y>.png.
+# De serve_tile route hierboven probeert eerst lokaal, valt terug op
+# internet wanneer een tile niet gecached is.
+#
+# Atomic writes: download naar .tmp, dan os.replace zodat een crashed
+# download geen corrupte PNG achterlaat.
+
+def tile_cache_path(source, z, x, y):
+    """Bouw het filesystem-pad voor een tile in onze cache."""
+    return os.path.join(TILE_CACHE_DIR, source, str(z), str(x), f"{y}.png")
+
+
+def fetch_tile_from_internet(source, z, x, y):
+    """
+    Haal een tile op bij de externe tile-server. Returns (bytes, content_type)
+    of (None, None) bij fout (netwerk, 404, blokkering).
+
+    Slaat het resultaat NIET zelf op — dat doet de aanroeper, zodat
+    fetch en cache-write apart te debuggen zijn.
+    """
+    import urllib.request
+    import urllib.error
+
+    if source not in TILE_SOURCES:
+        return None, None
+
+    url = TILE_SOURCES[source].format(z=z, x=x, y=y)
+    req = urllib.request.Request(url, headers={'User-Agent': TILE_USER_AGENT})
+
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = response.read()
+            content_type = response.headers.get('Content-Type', 'image/png')
+            return data, content_type
+    except urllib.error.URLError as e:
+        # Netwerk down, geen internet, of tile server unreachable
+        print(f"[tiles] fetch failed {source}/{z}/{x}/{y}: {e}")
+        return None, None
+    except Exception as e:
+        print(f"[tiles] unexpected error {source}/{z}/{x}/{y}: {e}")
+        return None, None
+
+
+def save_tile_to_cache(source, z, x, y, data):
+    """
+    Schrijf een tile atomisch naar de cache. Maakt parent-directories aan
+    indien nodig. Returns True bij succes.
+    """
+    path = tile_cache_path(source, z, x, y)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp_path = path + '.tmp'
+        with open(tmp_path, 'wb') as f:
+            f.write(data)
+        os.replace(tmp_path, path)
+        return True
+    except IOError as e:
+        print(f"[tiles] save failed {source}/{z}/{x}/{y}: {e}")
+        return False
+
+
+        # --- Tile berekeningen (slippy-map / mercator) ---
+# Deze functies zijn een copy van prefetch_tiles.py zodat de Flask-route
+# zelfstandig kan rekenen zonder dat script te moeten importeren. Bij een
+# latere refactor zou tile_utils.py een gedeelde module kunnen worden.
+
+def deg2num(lat_deg, lon_deg, zoom):
+    """Lat/lon -> tile (x, y) op een gegeven zoom (Slippy-map convention)."""
+    lat_rad = math.radians(lat_deg)
+    n = 2.0 ** zoom
+    xtile = int((lon_deg + 180.0) / 360.0 * n)
+    ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
+    return xtile, ytile
+
+
+def tiles_for_area(lat, lon, radius_km, zoom):
+    """Bereken alle (x, y) tile-coords binnen een radius op een zoom-level."""
+    lat_offset = radius_km / 111.0
+    lon_offset = radius_km / (111.0 * math.cos(math.radians(lat)))
+    lat_min, lat_max = lat - lat_offset, lat + lat_offset
+    lon_min, lon_max = lon - lon_offset, lon + lon_offset
+
+    # y is omgekeerd in slippy-map (noord = ymin)
+    x_min, y_max = deg2num(lat_min, lon_min, zoom)
+    x_max, y_min = deg2num(lat_max, lon_max, zoom)
+
+    tiles = []
+    for x in range(x_min, x_max + 1):
+        for y in range(y_min, y_max + 1):
+            tiles.append((x, y))
+    return tiles
+
+
+# --- Prefetch background state ---
+# Eén lopende prefetch tegelijk. Frontend pollt /api/tiles/prefetch/status
+# voor voortgang. State leeft in geheugen, gaat verloren bij service-restart
+# (acceptabel: bij restart zou prefetch sowieso interrupt zijn).
+
+prefetch_state = {
+    'running': False,
+    'started_at': None,
+    'total': 0,
+    'done': 0,
+    'success': 0,
+    'fail': 0,
+    'message': '',
+}
+prefetch_lock = threading.Lock()
+
+
+def run_prefetch(lat, lon, radius_km, zoom_min, zoom_max, sources):
+    """
+    Background-thread functie die tiles ophaalt via fetch_tile_from_internet
+    en in de cache opslaat. Updatet prefetch_state zodat de frontend kan pollen.
+    """
+    # Bouw eerst de volledige werklijst zodat 'total' correct is
+    work = []  # (source, z, x, y)
+    for source in sources:
+        if source not in TILE_SOURCES:
+            continue
+        for z in range(zoom_min, zoom_max + 1):
+            for (x, y) in tiles_for_area(lat, lon, radius_km, z):
+                work.append((source, z, x, y))
+
+    with prefetch_lock:
+        prefetch_state['total'] = len(work)
+        prefetch_state['done'] = 0
+        prefetch_state['success'] = 0
+        prefetch_state['fail'] = 0
+        prefetch_state['message'] = f'Bezig: {len(work)} tiles'
+
+    for (source, z, x, y) in work:
+        # Skip als al gecached — bespaart bandwidth bij herhaalde prefetch
+        path = tile_cache_path(source, z, x, y)
+        if os.path.exists(path):
+            with prefetch_lock:
+                prefetch_state['done'] += 1
+                prefetch_state['success'] += 1
+            continue
+
+        data, _ = fetch_tile_from_internet(source, z, x, y)
+        if data is not None:
+            save_tile_to_cache(source, z, x, y, data)
+            with prefetch_lock:
+                prefetch_state['success'] += 1
+        else:
+            with prefetch_lock:
+                prefetch_state['fail'] += 1
+
+        with prefetch_lock:
+            prefetch_state['done'] += 1
+
+    with prefetch_lock:
+        prefetch_state['running'] = False
+        prefetch_state['message'] = (
+            f'Klaar: {prefetch_state["success"]} OK, '
+            f'{prefetch_state["fail"]} fail'
+        )
 
 
 # ============================================
@@ -791,6 +975,196 @@ def api_log_clear():
     if save_log([]):
         return '', 204
     return jsonify({'error': 'opslaan mislukt'}), 500
+
+    # ============================================
+# TILE ROUTE — lokaal-eerst, internet-fallback
+# ============================================
+
+@app.route('/tiles/<source>/<int:z>/<int:x>/<int:y>.png')
+def serve_tile(source, z, x, y):
+    """
+    Lever een map-tile aan de browser. Twee stappen:
+
+      1. Probeer uit lokale cache (data/tiles/...)
+      2. Bij cache-miss: download van externe server, sla op in cache,
+         lever aan browser
+
+    Bij geen internet en geen cache: 404. Frontend Leaflet behandelt
+    dit als "tile niet beschikbaar" en toont een grijs vlak.
+    """
+    if source not in TILE_SOURCES:
+        return jsonify({'error': f'onbekende source: {source}'}), 400
+
+    # 1. Cache check
+    path = tile_cache_path(source, z, x, y)
+    if os.path.exists(path):
+        # Detecteer JPEG-magic-bytes (ArcGIS levert JPEG) vs PNG
+        with open(path, 'rb') as f:
+            magic = f.read(3)
+        mime = 'image/jpeg' if magic[:3] == b'\xff\xd8\xff' else 'image/png'
+        return send_file(path, mimetype=mime)
+
+    # 2. Cache miss — probeer internet
+    data, content_type = fetch_tile_from_internet(source, z, x, y)
+    if data is None:
+        # Geen internet of tile niet bestaand op server
+        return '', 404
+
+    # Sla op voor toekomstig gebruik (best-effort, faal stil als disk vol)
+    save_tile_to_cache(source, z, x, y, data)
+
+    # Lever direct aan browser zonder een tweede disk-read
+    return data, 200, {'Content-Type': content_type}
+
+
+@app.route('/api/tiles/stats')
+def api_tile_stats():
+    """
+    Statistieken over de tile cache: aantal tiles per source, totale
+    disk-grootte. Wordt door dashboard gebruikt om operator te informeren
+    hoeveel offline-kaart-data lokaal beschikbaar is.
+    """
+    stats = {}
+    if not os.path.exists(TILE_CACHE_DIR):
+        return jsonify({'sources': {}, 'total_bytes': 0, 'total_count': 0})
+
+    total_bytes = 0
+    total_count = 0
+
+    for source in TILE_SOURCES.keys():
+        source_dir = os.path.join(TILE_CACHE_DIR, source)
+        if not os.path.exists(source_dir):
+            stats[source] = {'count': 0, 'bytes': 0}
+            continue
+
+        count = 0
+        size = 0
+        for root, dirs, files in os.walk(source_dir):
+            for f in files:
+                if f.endswith('.png'):
+                    count += 1
+                    try:
+                        size += os.path.getsize(os.path.join(root, f))
+                    except OSError:
+                        pass
+        stats[source] = {'count': count, 'bytes': size}
+        total_bytes += size
+        total_count += count
+
+    return jsonify({
+        'sources': stats,
+        'total_bytes': total_bytes,
+        'total_count': total_count,
+    })
+
+@app.route('/api/tiles/prefetch', methods=['POST'])
+def api_tile_prefetch():
+    """
+    Start een tile-prefetch in de achtergrond. Body:
+      {
+        "lat": 50.85, "lon": 4.35,
+        "radius_km": 2.0,
+        "zoom_min": 13, "zoom_max": 16,
+        "sources": ["osm", "sat", "hyb"]
+      }
+    Returns 202 Accepted met initial status, of 409 Conflict als er al
+    een prefetch loopt.
+    """
+    with prefetch_lock:
+        if prefetch_state['running']:
+            return jsonify({
+                'error': 'prefetch is al bezig',
+                'state': dict(prefetch_state)
+            }), 409
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        lat = float(payload['lat'])
+        lon = float(payload['lon'])
+        radius_km = float(payload['radius_km'])
+        zoom_min = int(payload['zoom_min'])
+        zoom_max = int(payload['zoom_max'])
+        sources = payload.get('sources', ['osm', 'sat', 'hyb'])
+    except (KeyError, ValueError, TypeError) as e:
+        return jsonify({'error': f'ongeldig payload: {e}'}), 400
+
+    if zoom_min < 0 or zoom_max > 19 or zoom_min > zoom_max:
+        return jsonify({'error': 'zoom moet 0-19 zijn, min <= max'}), 400
+
+    if radius_km <= 0 or radius_km > 50:
+        return jsonify({'error': 'radius moet 0-50 km zijn'}), 400
+
+    # Start background thread
+    with prefetch_lock:
+        prefetch_state['running'] = True
+        prefetch_state['started_at'] = time.time()
+        prefetch_state['total'] = 0
+        prefetch_state['done'] = 0
+        prefetch_state['success'] = 0
+        prefetch_state['fail'] = 0
+        prefetch_state['message'] = 'Voorbereiden...'
+
+    thread = threading.Thread(
+        target=run_prefetch,
+        args=(lat, lon, radius_km, zoom_min, zoom_max, sources),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({'state': dict(prefetch_state)}), 202
+
+
+@app.route('/api/tiles/prefetch/status')
+def api_tile_prefetch_status():
+    """Huidige status van background prefetch. Frontend pollt deze."""
+    with prefetch_lock:
+        return jsonify(dict(prefetch_state))
+
+
+@app.route('/api/tiles', methods=['DELETE'])
+def api_tile_delete():
+    """
+    Wis tile-cache. Query param ?source=osm/sat/hyb om één source te wissen,
+    geen param = alles wissen.
+    Returns 200 met aantal verwijderde bestanden + bespaarde bytes.
+    """
+    import shutil
+    source = request.args.get('source')
+
+    if source is not None and source not in TILE_SOURCES:
+        return jsonify({'error': f'onbekende source: {source}'}), 400
+
+    deleted_count = 0
+    deleted_bytes = 0
+
+    if source:
+        # Alleen één source
+        targets = [os.path.join(TILE_CACHE_DIR, source)]
+    else:
+        # Alles
+        targets = [os.path.join(TILE_CACHE_DIR, s) for s in TILE_SOURCES.keys()]
+
+    for target in targets:
+        if not os.path.exists(target):
+            continue
+        # Tel eerst, dan delete
+        for root, dirs, files in os.walk(target):
+            for f in files:
+                if f.endswith('.png'):
+                    try:
+                        deleted_bytes += os.path.getsize(os.path.join(root, f))
+                        deleted_count += 1
+                    except OSError:
+                        pass
+        try:
+            shutil.rmtree(target)
+        except OSError as e:
+            return jsonify({'error': f'kon {target} niet wissen: {e}'}), 500
+
+    return jsonify({
+        'deleted_count': deleted_count,
+        'deleted_bytes': deleted_bytes,
+    })
 
 @socketio.on('connect')
 def handle_connect():

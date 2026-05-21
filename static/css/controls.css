@@ -49,7 +49,10 @@
     background: rgba(0, 0, 0, 0.8);
     justify-content: center;
     align-items: center;
-    z-index: 1000;
+    padding: 20px;
+    overflow-y: auto;
+    z-index: 2000;
+    box-sizing: border-box;
 }
 
 .modal.show {
@@ -63,6 +66,8 @@
     text-align: center;
     border: 1px solid #f5a623;
     min-width: 350px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
 }
 
 .modal-content h3 {
@@ -213,4 +218,226 @@
     text-align: center;
     padding: 24px;
     font-style: italic;
+}
+
+/* ============================================
+   TILE CACHE MODAL — offline kaarten beheer
+   ============================================ */
+
+.tile-stats {
+    background: #0f3460;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 10px;
+}
+
+.tile-stats-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    color: #eee;
+    font-size: 0.9em;
+}
+
+.tile-stats-row.total {
+    border-top: 1px solid #1a4080;
+    margin-top: 6px;
+    padding-top: 8px;
+    font-weight: bold;
+}
+
+.tile-stats-source {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tile-stats-value {
+    color: #aaa;
+    font-family: 'Consolas', monospace;
+    font-size: 0.85em;
+}
+
+.tile-stats-delete {
+    background: transparent;
+    border: 1px solid #444;
+    color: #aaa;
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin-left: 8px;
+    cursor: pointer;
+    font-size: 0.8em;
+}
+.tile-stats-delete:hover {
+    background: #f87171;
+    color: #fff;
+    border-color: #f87171;
+}
+
+.tile-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.prefetch-location {
+    background: #0f3460;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-top: 6px;
+    margin-bottom: 10px;
+    color: #aaa;
+    font-size: 0.85em;
+    font-style: italic;
+}
+
+.prefetch-location.set {
+    color: #16a34a;
+    font-style: normal;
+    font-weight: 500;
+}
+
+.prefetch-location.set::before {
+    content: "📍 ";
+}
+
+.tile-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.tile-form label > span {
+    color: #ccc;
+    font-size: 0.85em;
+}
+
+.tile-form input, .tile-form select {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    color: #eee;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+
+.tile-form input:focus, .tile-form select:focus {
+    outline: none;
+    border-color: #f5a623;
+}
+
+.prefetch-progress {
+    margin-top: 12px;
+}
+
+.prefetch-bar {
+    background: #0f3460;
+    border-radius: 4px;
+    height: 14px;
+    overflow: hidden;
+}
+
+.prefetch-bar-fill {
+    background: #16a34a;
+    height: 100%;
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+.prefetch-label {
+    text-align: center;
+    margin-top: 4px;
+    color: #aaa;
+    font-size: 0.85em;
+}
+
+/* Adres-autocomplete (Nominatim) */
+.address-search-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 10px;
+    margin-bottom: 4px;
+}
+
+.address-search-wrapper > span {
+    color: #ccc;
+    font-size: 0.85em;
+}
+
+.address-search-container {
+    position: relative;
+}
+
+.address-search-container input {
+    width: 100%;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    color: #eee;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    box-sizing: border-box;
+}
+
+.address-search-container input:focus {
+    outline: none;
+    border-color: #f5a623;
+}
+
+.address-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    margin-top: 2px;
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 10;
+    display: none;
+}
+
+.address-suggestions.show {
+    display: block;
+}
+
+.address-suggestion {
+    padding: 8px 10px;
+    cursor: pointer;
+    color: #eee;
+    font-size: 0.85em;
+    border-bottom: 1px solid #0f3460;
+    transition: background 0.1s;
+}
+
+.address-suggestion:last-child {
+    border-bottom: none;
+}
+
+.address-suggestion:hover {
+    background: #16213e;
+}
+
+.address-suggestion .addr-main {
+    color: #eee;
+    font-weight: 500;
+}
+
+.address-suggestion .addr-detail {
+    color: #aaa;
+    font-size: 0.85em;
+    margin-top: 2px;
+}
+
+.address-empty, .address-loading {
+    padding: 12px;
+    color: #aaa;
+    font-style: italic;
+    text-align: center;
+    font-size: 0.85em;
 }

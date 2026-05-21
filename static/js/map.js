@@ -16,8 +16,9 @@
  *    verberg "wachten op fix" badge.
  *  - Trail accumuleert pas vanaf eerste echte fix (geen (0,0) punten).
  *
- * Afhankelijkheden:
- *  - Leaflet (geladen via CDN in dashboard.html)
+* Afhankelijkheden:
+ *  - Leaflet (vendored lokaal in static/vendor/leaflet/)
+ *  - Tile cache via /tiles/<source>/{z}/{x}/{y}.png (Flask route)
  *  - HTML elementen: #map, #map-lat, #map-lon, #map-alt, #gps-waiting-badge
  */
 
@@ -63,20 +64,18 @@ function initMap() {
     });
 
     // --- Kaartlagen ---
-    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+ const osmLayer = L.tileLayer('/tiles/osm/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap',
-        maxZoom: 22
+        maxZoom: 19
     });
 
-    const satelliteLayer = L.tileLayer(
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    const satelliteLayer = L.tileLayer('/tiles/sat/{z}/{x}/{y}.png', {
         attribution: '© Esri',
-        maxZoom: 22
+        maxZoom: 19
     });
 
-    const hybridLayer = L.tileLayer(
-        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
-        maxZoom: 22
+    const hybridLayer = L.tileLayer('/tiles/hyb/{z}/{x}/{y}.png', {
+        maxZoom: 19
     });
 
     // Start met satelliet + straatnamen overlay
