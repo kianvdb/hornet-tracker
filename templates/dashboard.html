@@ -136,6 +136,9 @@
 
 
        <div class="navbar-actions">
+        <button class="navbar-action-btn" onclick="openTileCacheModal()" title="Offline kaart-tiles beheren">
+                🗺️
+            </button>
             <button class="navbar-btn" onclick="showRebootModal()" title="Herstart Pi">
                 🔄 Herstart
             </button>
@@ -354,6 +357,108 @@
         </div>
     </div>
 
+    <!-- Tile cache management modal -->
+    <div class="modal" id="tile-cache-modal">
+        <div class="modal-content" style="min-width: 520px; max-width: 640px; text-align: left;">
+            <h3>🗺️ Offline kaart-tiles</h3>
+
+            <div style="color:#aaa; font-size:0.9em; margin-bottom:14px;">
+                Download kaarttegels voor een gebied zodat het dashboard
+                offline werkt tijdens veldwerk.
+            </div>
+
+            <!-- Cache stats -->
+            <div class="tile-stats" id="tile-stats">
+                <div class="tile-stats-row">
+                    <span>Bezig met laden...</span>
+                </div>
+            </div>
+
+            <!-- Prefetch form -->
+            <h4 style="margin-top:18px; color:#eee;">Nieuw gebied downloaden</h4>
+
+           <label class="address-search-wrapper">
+                <span>Zoek adres of plaatsnaam</span>
+                <div class="address-search-container">
+                    <input type="text" id="prefetch-address" autocomplete="off"
+                           placeholder="bv. Anderlecht, of Brussel"
+                           oninput="onAddressInput()" onfocus="onAddressInput()">
+                    <div class="address-suggestions" id="address-suggestions"></div>
+                </div>
+            </label>
+
+            <!-- Hidden coordinaten — gevuld door selectAddress() of useCurrentDronePos() -->
+            <input type="hidden" id="prefetch-lat" value="">
+            <input type="hidden" id="prefetch-lon" value="">
+
+            <!-- Locatie-bevestiging onder het adres-veld -->
+            <div class="prefetch-location" id="prefetch-location">
+                Geen locatie geselecteerd
+            </div>
+
+            <div class="tile-form tile-form-row">
+                <label>
+                    <span>Radius (km)</span>
+                    <input type="number" id="prefetch-radius" step="0.5" min="0.5" max="50" value="2">
+                </label>
+                <label>
+                    <span>Zoom min</span>
+                    <select id="prefetch-zoom-min">
+                        <option value="10">10 (regio)</option>
+                        <option value="12">12 (stad)</option>
+                        <option value="13" selected>13 (wijk)</option>
+                        <option value="14">14 (straten)</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Zoom max</span>
+                    <select id="prefetch-zoom-max">
+                        <option value="15">15</option>
+                        <option value="16" selected>16 (gebouwen)</option>
+                        <option value="17">17 (detail)</option>
+                        <option value="18">18 (dak)</option>
+                    </select>
+                </label>
+            </div>
+
+            <div style="margin-top:8px;">
+                <label style="display:flex; align-items:center; gap:6px; color:#ccc; font-size:0.9em;">
+                    <input type="checkbox" id="prefetch-src-osm" checked>
+                    🗺️ Stratenplan (OSM)
+                </label>
+                <label style="display:flex; align-items:center; gap:6px; color:#ccc; font-size:0.9em;">
+                    <input type="checkbox" id="prefetch-src-sat" checked>
+                    🛰️ Satelliet (ArcGIS)
+                </label>
+                <label style="display:flex; align-items:center; gap:6px; color:#ccc; font-size:0.9em;">
+                    <input type="checkbox" id="prefetch-src-hyb" checked>
+                    🏷️ Straatnamen overlay
+                </label>
+            </div>
+
+            <button class="btn btn-small btn-secondary" style="margin-top:8px;"
+                    onclick="useCurrentDronePos()">📍 Gebruik huidige drone-positie</button>
+
+            <!-- Progress bar (verborgen tot prefetch loopt) -->
+            <div class="prefetch-progress" id="prefetch-progress" style="display:none;">
+                <div class="prefetch-bar">
+                    <div class="prefetch-bar-fill" id="prefetch-bar-fill"></div>
+                </div>
+                <div class="prefetch-label" id="prefetch-label">0 / 0</div>
+            </div>
+
+            <div class="btn-group" style="justify-content: space-between; margin-top: 14px;">
+                <button class="btn btn-danger btn-small" onclick="clearAllTiles()">🗑️ Cache wissen</button>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-secondary" onclick="hideModals()">Sluiten</button>
+                    <button class="btn btn-success" id="prefetch-start-btn" onclick="startPrefetch()">
+                        Download starten
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal" id="shutdown-modal">
         <div class="modal-content">
             <h3>⏻ Pi Afsluiten</h3>
@@ -411,7 +516,8 @@
     <script src="{{ url_for('static', filename='js/signal-display.js') }}"></script>
     <script src="{{ url_for('static', filename='js/socket-handlers.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modals.js') }}"></script>
-        <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>    
+    <script src="{{ url_for('static', filename='js/tile-cache.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>    
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
