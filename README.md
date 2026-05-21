@@ -96,7 +96,7 @@ de Pixhawk.
 - **Excel-export** — openpyxl voor server-side generatie van
   gestileerde XLSX-bestanden uit log-entries
 - **Frontend** — vanilla JavaScript (geen build-step), Leaflet voor de
-  kaart, browser localStorage voor log-persistentie
+  kaart, fetch-API voor REST-calls naar de backend log-persistentie
 
 Het dashboard draait als achtergrondproces op de Raspberry Pi via een
 systemd service (`hornet-tracker.service`). Zie [Installatie](#installatie)
@@ -233,6 +233,10 @@ hornet-tracker/
 ├── templates/
 │   └── dashboard.html              pure markup, geen inline JS/CSS
 │
+├── data/                           runtime persistente data (gitignored)
+│   ├── README.md                   uitleg over wat hier hoort
+│   └── coord-log.json              gelogde entries, gegenereerd op de Pi
+│
 └── static/
     ├── socket.io.min.js            client library (vendored)
     │
@@ -251,13 +255,13 @@ hornet-tracker/
         ├── utils.js                rssi helpers, toast, card status
         ├── map.js                  Leaflet init, drone marker, trail, click-handler
         ├── coord-log.js            log entries, map-click pin, status/notitie,
-        │                           edit, delete, localStorage, Excel-export flow
+        │                           edit, delete, REST naar backend, Excel-export
         ├── drone-controls.js       arm/disarm/mode + command result handler
         ├── signal-display.js       LoRa signal card + baseline reset
         ├── navbar.js               popover toggle + click-outside-to-close
         ├── socket-handlers.js      connect/disconnect/status_update dispatch
         ├── modals.js               shutdown/reboot/arm/log/export dialoogvensters
-        └── main.js                 bootstrap (socket + init + localStorage load)
+        └── main.js                 bootstrap (socket + init + log fetchen van Pi)
 ```
 
 ### Frontend module-volgorde
@@ -269,8 +273,8 @@ hornet-tracker/
 2. `socket-handlers.js` — handlers die `window.socket` gebruiken.
 3. `modals.js` — dialog-logica voor shutdown/reboot/arm/log/export.
 4. `navbar.js` — popover open/sluit logica voor navbar-items.
-5. `main.js` — bootstrap: maakt de socket aan, laadt log uit localStorage,
-   initialiseert alles na `DOMContentLoaded`.
+5. `main.js` — bootstrap: maakt de socket aan, haalt log van de Pi via
+   `GET /api/log`, initialiseert alles na `DOMContentLoaded`.
 
 Alle module-functies worden op `window` gezet zodat inline
 `onclick="..."` handlers in de HTML rechtstreeks werken zonder
@@ -336,11 +340,14 @@ feature inzoomen op de chronologie van een onderdeel.
 - `feature/dashboard-redesign` — navbar met klikbare popovers, 2-koloms
   layout, oude cards/strip verwijderd
 - `feature/log-status-flow` — map-click pin, status + notitie per entry,
-  edit-flow, localStorage persistentie
+  edit-flow per entry
 - `feature/drone-command-handlers` — server-side `arm_drone` /
   `disarm_drone` / `set_mode` handlers
 - `feature/xlsx-export` — gestileerde Excel-export met selectie-modal,
   verwijder-knop per log-entry
+- `feature/log-backend-persistence` — log van browser-localStorage naar
+  JSON-bestand op de Pi, REST endpoints voor toekomstige bestrijders-
+  platform integratie
 
 **Lopende (wacht op hardware):**
 
@@ -352,9 +359,7 @@ feature inzoomen op de chronologie van een onderdeel.
 
 - `feature/offline-tiles` — vendor Leaflet + pre-cached
   OpenStreetMap-tiles voor België zodat dashboard werkt zonder internet
-- `feature/log-backend-persistence` — log opslaan in SQLite of JSON op
-  de Pi i.p.v. alleen browser-localStorage; voorbereiding voor
-  toekomstige bestrijders-platform sync
+
 
 ### Commit messages
 
@@ -409,7 +414,10 @@ incrementele stap zonder dependencies te hoeven introduceren.
   - source-tracking (drone vs manueel) met visuele iconen
   - bewerken van bestaande entries via potlood-knop
   - verwijderen van individuele entries via prullenbak-knop
-  - localStorage persistentie (overleeft browser-refresh)
+  - server-side persistentie op de Pi (JSON-bestand, overleeft refresh,
+    cross-browser zichtbaar, blijft bij Pi-reboot)
+  - REST API endpoints (GET/POST/PUT/DELETE) voor toekomstige bestrijders-
+    platform integratie
   - Google Maps deeplinks
 - Server-side handlers voor `arm_drone` / `disarm_drone` / `set_mode`
 - Gestileerde Excel-export met:
@@ -425,7 +433,6 @@ incrementele stap zonder dependencies te hoeven introduceren.
 - MLX90640 warmtecamera integratie via I2C (Pimoroni 55° onderweg)
 - Ra-01 LoRa-pakketdecodering ter vervanging van RTL-SDR energy detection
 - Offline kaart-tiles voor echt veldgebruik zonder internet
-- Backend-persistentie voor log (SQLite of JSON op de Pi)
 - Layout-finetuning na thermal- en LoRa-integratie zodat alle cards
   exact passen op 1920 × 1080 zonder scrollen
 - Besturing card collapse-toggle (mode-knoppen verbergen tijdens vlucht

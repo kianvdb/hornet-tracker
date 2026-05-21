@@ -21,6 +21,7 @@ Kalibratie van beacon v2 (zie beacon.ino):
 
 from flask import Flask, render_template, jsonify, request, send_file
 import io
+import json
 from flask_socketio import SocketIO
 import subprocess
 import threading
@@ -61,6 +62,15 @@ MAVLINK_BAUD = 57600
 
 # --- WiFi hotspot ---
 WIFI_HOTSPOT_IFACE = 'wlan1'
+
+# --- Persistente log storage ---
+# JSON-bestand op disk i.p.v. browser-localStorage zodat log overleeft
+# browser-refresh, andere browsers, andere devices, en Pi-reboots.
+# Atomic writes via temp-file + os.replace zodat een crash midden in
+# een write geen corrupte file achterlaat.
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+LOG_FILE = os.path.join(DATA_DIR, 'coord-log.json')
+log_lock = threading.Lock()
 
 # ============================================
 # FLASK APP
@@ -105,6 +115,84 @@ baseline_reset_requested = False
 # naar de Pixhawk te sturen. None betekent: geen verbinding actief.
 mav_connection = None
 mav_lock = threading.Lock()
+
+# ============================================
+# COORDINATE LOG STORAGE (JSON op disk)
+# ============================================
+#
+# Het gelogde-coordinaten-bestand is de "source of truth" voor alle
+# entries. Frontend leest het via GET /api/log bij page-load en
+# wijzigt het via POST/PUT/DELETE endpoints.
+#
+# Bestandsformaat: lijst van entry-objects, top-level array.
+#   [
+#     {"id": "abc123", "lat": 50.7, "lon": 4.3, "alt": 0,
+#      "time": "15:44:22", "date": "2026-05-20T13:44:22.829Z",
+#      "source": "manueel"|"drone",
+#      "status": "gemeld"|"wordt_onderzocht"|"waargenomen"|"bestreden"|"vals_alarm"|"",
+#      "notes": ""},
+#     ...
+#   ]
+#
+# ID is een server-side gegenereerde unieke string (timestamp+random).
+# Frontend gebruikt deze voor PUT/DELETE in plaats van array-index zodat
+# delete + concurrent edit niet de verkeerde entry raakt.
+
+def ensure_data_dir():
+    """Maak data/ aan als hij niet bestaat (bv. eerste run)."""
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+
+def load_log():
+    """
+    Lees coord-log uit JSON-bestand. Returns lege lijst als bestand niet
+    bestaat of corrupt is. Thread-safe via log_lock.
+    """
+    with log_lock:
+        if not os.path.exists(LOG_FILE):
+            return []
+        try:
+            with open(LOG_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data
+            print(f"!! coord-log.json bevat geen lijst, return leeg")
+            return []
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"!! coord-log.json lezen mislukt: {e}, return leeg")
+            return []
+
+
+def save_log(entries):
+    """
+    Schrijf coord-log atomisch naar disk: write naar .tmp file, dan
+    os.replace() naar definitieve naam. os.replace is atomair op POSIX
+    zodat het bestand nooit half-geschreven op disk staat bij een crash.
+    Thread-safe via log_lock.
+    """
+    with log_lock:
+        ensure_data_dir()
+        tmp_path = LOG_FILE + '.tmp'
+        try:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(entries, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, LOG_FILE)
+            return True
+        except IOError as e:
+            print(f"!! coord-log.json schrijven mislukt: {e}")
+            return False
+
+
+def generate_entry_id():
+    """
+    Genereer een unieke string-ID voor een nieuwe entry.
+    Gebruikt timestamp (ms) + 4 random hex chars zodat collisions
+    onmogelijk zijn bij realistische gebruiks-rate.
+    """
+    import secrets
+    timestamp_ms = int(time.time() * 1000)
+    random_hex = secrets.token_hex(2)
+    return f"{timestamp_ms}-{random_hex}"
 
 
 # ============================================
@@ -603,6 +691,106 @@ def export_xlsx():
         download_name=filename,
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
+
+    # ============================================
+# REST ENDPOINTS — coördinaat log
+# ============================================
+
+@app.route('/api/log', methods=['GET'])
+def api_log_get():
+    """
+    Haal alle gelogde entries op. Wordt door frontend aangeroepen bij
+    page-load om de log te tonen.
+    """
+    entries = load_log()
+    return jsonify(entries)
+
+
+@app.route('/api/log', methods=['POST'])
+def api_log_post():
+    """
+    Voeg een nieuwe entry toe. Verwacht JSON body:
+      {lat, lon, alt, time, date, source, status, notes}
+    Server genereert het 'id' veld en voegt de entry achteraan toe.
+    Returns de aangemaakte entry inclusief id.
+    """
+    payload = request.get_json(silent=True) or {}
+
+    # Minimaal validatie — lat/lon zijn vereist
+    if 'lat' not in payload or 'lon' not in payload:
+        return jsonify({'error': 'lat en lon zijn vereist'}), 400
+
+    entry = {
+        'id':     generate_entry_id(),
+        'lat':    float(payload.get('lat', 0)),
+        'lon':    float(payload.get('lon', 0)),
+        'alt':    float(payload.get('alt', 0)),
+        'time':   payload.get('time', ''),
+        'date':   payload.get('date', ''),
+        'source': payload.get('source', 'manueel'),
+        'status': payload.get('status', ''),
+        'notes':  payload.get('notes', ''),
+    }
+
+    entries = load_log()
+    entries.append(entry)
+    if save_log(entries):
+        return jsonify(entry), 201
+    return jsonify({'error': 'opslaan mislukt'}), 500
+
+
+@app.route('/api/log/<entry_id>', methods=['PUT'])
+def api_log_put(entry_id):
+    """
+    Bewerk een bestaande entry. Identificatie via stabiele server-side
+    ID, niet via array-index. Body bevat de velden die gewijzigd worden;
+    onbenoemde velden blijven ongewijzigd. Returns de bijgewerkte entry.
+    """
+    payload = request.get_json(silent=True) or {}
+
+    entries = load_log()
+    for entry in entries:
+        if entry.get('id') == entry_id:
+            # Update alleen toegestane velden
+            for field in ('status', 'notes', 'lat', 'lon', 'alt'):
+                if field in payload:
+                    if field in ('lat', 'lon', 'alt'):
+                        entry[field] = float(payload[field])
+                    else:
+                        entry[field] = payload[field]
+            if save_log(entries):
+                return jsonify(entry)
+            return jsonify({'error': 'opslaan mislukt'}), 500
+
+    return jsonify({'error': f'entry {entry_id} niet gevonden'}), 404
+
+
+@app.route('/api/log/<entry_id>', methods=['DELETE'])
+def api_log_delete(entry_id):
+    """
+    Verwijder één entry op basis van stabiele ID.
+    Returns 204 No Content bij succes, 404 als de entry niet bestaat.
+    """
+    entries = load_log()
+    new_entries = [e for e in entries if e.get('id') != entry_id]
+
+    if len(new_entries) == len(entries):
+        return jsonify({'error': f'entry {entry_id} niet gevonden'}), 404
+
+    if save_log(new_entries):
+        return '', 204
+    return jsonify({'error': 'opslaan mislukt'}), 500
+
+
+@app.route('/api/log', methods=['DELETE'])
+def api_log_clear():
+    """
+    Wis alle entries (equivalent van 'Wissen' knop in dashboard).
+    Returns 204 No Content.
+    """
+    if save_log([]):
+        return '', 204
+    return jsonify({'error': 'opslaan mislukt'}), 500
 
 @socketio.on('connect')
 def handle_connect():

@@ -33,9 +33,8 @@
         // zoomt later in op echte GPS-fix.
         window.initMap();
 
-      window.loadCoordLogFromStorage();   // herstelt log na refresh
-        window.updateLogDisplay();
-
+   window.initCoordLogFromServer();    // haalt log van Pi
+   
         // Module-specifieke socket handlers registreren.
         // Volgorde maakt niet uit — ze luisteren op verschillende events.
         window.registerCoreSocketHandlers();          // connect / disconnect / status_update

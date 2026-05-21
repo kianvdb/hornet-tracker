@@ -5,3 +5,6 @@ __pycache__/
 venv/
 .env
 .vscode/
+
+# Runtime data — persistente log entries, niet in git
+data/coord-log.json
