@@ -1,70 +1,173 @@
 /**
  * COORD-LOG — gelogde coordinaten met pins op kaart
  *
- * Bevat:
- *  - logCoordinate()              start log-flow voor huidige drone-positie (auto)
- *  - handleMapClick(latlng)       start log-flow voor manueel geprikte locatie
- *  - openLogModal(data)           open de log-modal met voor-gevulde defaults
- *  - confirmLogEntry()            opslaan vanuit modal (status + notitie)
- *  - updateLogDisplay()           render lijst rechts van de kaart
- *  - copyCoord(index)             kopieer "lat, lon" naar clipboard
- *  - clearLog()                   wis alle gelogde punten
- *  - exportLog()                  download CSV
+ * BACKEND-PERSISTENTIE versie: alle log-state leeft in JSON-bestand
+ * op de Pi (data/coord-log.json). Browser is een view-laag die via
+ * REST endpoints leest/schrijft:
  *
- * Entry-structuur:
+ *   GET    /api/log                  — alle entries
+ *   POST   /api/log                  — nieuwe entry (server genereert id)
+ *   PUT    /api/log/<id>             — bestaande entry bewerken
+ *   DELETE /api/log/<id>             — één entry verwijderen
+ *   DELETE /api/log                  — alle entries wissen
+ *
+ * Identificatie van entries gebeurt via stabiele server-side ID
+ * (timestamp-hex), niet via array-index. Zo blijven PUT/DELETE robuust
+ * tegen tussentijdse wijzigingen.
+ *
+ * Entry-structuur (zoals teruggegeven door backend):
  *   {
+ *     id,                            // server-generated: "timestamp-hex"
  *     lat, lon, alt,
- *     time, date,                    // tijdstempel
- *     source: 'drone' | 'manueel',   // hoe is deze pin ontstaan
- *     status: '' | 'gemeld' | ...    // operator-toegekende status
- *     notes: ''                      // vrije tekst
+ *     time, date,                    // tijdstempels (client-side gegenereerd)
+ *     source: 'drone' | 'manueel',
+ *     status: '' | 'gemeld' | 'wordt_onderzocht' | 'waargenomen'
+ *             | 'bestreden' | 'vals_alarm',
+ *     notes: ''
  *   }
  */
 
-/** Array met alle gelogde punten */
+/** Lokale cache van entries. Wordt geupdate na elke succesvolle server-call. */
 let coordLog = [];
 
-/** Pending entry tijdens modal-flow (wachten op operator confirm) */
+/** Pending entry tijdens modal-flow (wachten op operator confirm). */
 let pendingEntry = null;
-/** Index van entry die bewerkt wordt (null bij nieuwe entry) */
-let editingIndex = null;
-/** Houdt geplaatste markers bij zodat we ze later kunnen verwijderen */
-let logMarkers = [];
-/** Storage key voor localStorage persistence */
-const STORAGE_KEY = 'hornet-tracker-coordlog-v1';
+
+/** ID van entry die bewerkt wordt (null bij nieuwe entry). */
+let editingId = null;
 
 /**
- * Laad gelogde coördinaten uit localStorage bij page-init.
- * Roep aan vanuit main.js bij DOMContentLoaded, voor updateLogDisplay().
+ * Mapping van entry-id naar Leaflet marker zodat we markers kunnen
+ * opruimen op basis van stabiele identifier i.p.v. positie in array.
  */
-function loadCoordLogFromStorage() {
+let markersById = {};
+
+
+// ============================================
+// SERVER COMMUNICATIE — REST helpers
+// ============================================
+
+/**
+ * Haal alle entries op van de Pi. Bij netwerkfout: behoud huidige
+ * coordLog (graceful degradation in plaats van leeg te lopen).
+ */
+async function fetchAllEntries() {
     try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed)) {
-                coordLog = parsed;
-                console.log(`[coord-log] ${coordLog.length} entries geladen uit localStorage`);
-                // Plaats markers terug op de kaart
-                coordLog.forEach((entry, idx) => placeMarker(entry, idx + 1));
-            }
+        const response = await fetch('/api/log');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+    } catch (err) {
+        console.error('[coord-log] kon entries niet ophalen van Pi:', err);
+        window.showToast('Verbinding met Pi mislukt — log toont mogelijk oude data');
+        return null;
+    }
+}
+
+/**
+ * Voeg een nieuwe entry toe op de server. Returns de entry met
+ * server-generated id, of null bij fout.
+ */
+async function postEntry(data) {
+    try {
+        const response = await fetch('/api/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+    } catch (err) {
+        console.error('[coord-log] entry toevoegen mislukt:', err);
+        window.showToast('Opslaan op Pi mislukt');
+        return null;
+    }
+}
+
+/**
+ * Update een bestaande entry. Body bevat alleen de te wijzigen velden
+ * (typisch status + notes). Returns de bijgewerkte entry of null.
+ */
+async function putEntry(id, changes) {
+    try {
+        const response = await fetch(`/api/log/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(changes)
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+    } catch (err) {
+        console.error('[coord-log] entry bewerken mislukt:', err);
+        window.showToast('Wijziging opslaan op Pi mislukt');
+        return null;
+    }
+}
+
+/**
+ * Verwijder één entry op basis van id. Returns true bij succes.
+ */
+async function deleteEntry(id) {
+    try {
+        const response = await fetch(`/api/log/${encodeURIComponent(id)}`, {
+            method: 'DELETE'
+        });
+        if (!response.ok && response.status !== 204) {
+            throw new Error(`HTTP ${response.status}`);
         }
+        return true;
     } catch (err) {
-        console.warn('[coord-log] kon localStorage niet lezen:', err);
+        console.error('[coord-log] entry verwijderen mislukt:', err);
+        window.showToast('Verwijderen op Pi mislukt');
+        return false;
     }
 }
 
 /**
- * Persisteer huidige log naar localStorage.
- * Wordt aangeroepen na elke add/clear operatie.
+ * Wis alle entries (server-side). Returns true bij succes.
  */
-function saveCoordLogToStorage() {
+async function deleteAllEntries() {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(coordLog));
+        const response = await fetch('/api/log', { method: 'DELETE' });
+        if (!response.ok && response.status !== 204) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return true;
     } catch (err) {
-        console.warn('[coord-log] kon niet opslaan naar localStorage:', err);
+        console.error('[coord-log] alles wissen mislukt:', err);
+        window.showToast('Wissen op Pi mislukt');
+        return false;
     }
 }
+
+
+// ============================================
+// INITIALISATIE — bij DOMContentLoaded
+// ============================================
+
+/**
+ * Haal log op van Pi en plaats markers terug op de kaart.
+ * Wordt aangeroepen vanuit main.js bij page-load.
+ */
+async function initCoordLogFromServer() {
+    const entries = await fetchAllEntries();
+    if (entries === null) {
+        // Netwerkfout — laat lege state staan, frontend kan later opnieuw proberen
+        updateLogDisplay();
+        return;
+    }
+
+    coordLog = entries;
+    console.log(`[coord-log] ${coordLog.length} entries geladen van Pi`);
+
+    // Markers terugplaatsen
+    coordLog.forEach((entry, idx) => placeMarker(entry, idx + 1));
+    updateLogDisplay();
+}
+
+
+// ============================================
+// LOG-FLOW START — auto pin of map-click
+// ============================================
 
 /**
  * Auto-log: gebruik huidige drone-positie. Triggered door 'Log Positie' knop.
@@ -104,27 +207,24 @@ function handleMapClick(latlng) {
 }
 
 /**
- * Open log-modal met bestaande entry voor bewerken.
- * Verschilt van openLogModal in dat editingIndex wordt gezet zodat
- * confirmLogEntry weet dat het een update is, geen toevoeging.
+ * Open log-modal met bestaande entry voor bewerken. editingId wordt
+ * gezet zodat confirmLogEntry weet dat het een update is.
  */
-function editCoord(index) {
-    const entry = coordLog[index];
+function editCoord(id) {
+    const entry = coordLog.find(e => e.id === id);
     if (!entry) return;
 
-    editingIndex = index;
+    editingId = id;
 
-    // Hergebruik dezelfde modal-velden als bij nieuwe entry
     pendingEntry = {
-        lat: entry.lat,
-        lon: entry.lon,
-        alt: entry.alt,
+        lat:    entry.lat,
+        lon:    entry.lon,
+        alt:    entry.alt,
         source: entry.source,
-        // defaultStatus wordt straks overschreven door de huidige status
         defaultStatus: entry.status
     };
 
-    // Titel + source-tekst aanpassen voor edit-context
+    const index = coordLog.indexOf(entry);
     const title  = document.getElementById('log-modal-title');
     const source = document.getElementById('log-modal-source');
     title.textContent  = '✏️ Entry bewerken (#' + (index + 1) + ')';
@@ -132,12 +232,10 @@ function editCoord(index) {
         ? 'Oorspronkelijk geplaatst op drone-positie'
         : 'Oorspronkelijk handmatig geplaatst door operator';
 
-    // Coordinaten preview (read-only)
     document.getElementById('log-modal-coords').textContent =
         entry.lat.toFixed(7) + ', ' + entry.lon.toFixed(7);
     document.getElementById('log-modal-alt').textContent = entry.alt.toFixed(1);
 
-    // Vul huidige status en notitie in
     document.getElementById('log-modal-status').value = entry.status || '';
     document.getElementById('log-modal-notes').value  = entry.notes  || '';
 
@@ -145,13 +243,12 @@ function editCoord(index) {
 }
 
 /**
- * Open de log-modal en vul defaults. Operator kiest status + notitie,
- * klikt opslaan → confirmLogEntry() persisteert.
+ * Open de log-modal voor een nieuwe entry. Pre-fill defaults.
  */
 function openLogModal(data) {
     pendingEntry = data;
+    editingId = null;
 
-    // Titel + source-tekst
     const title  = document.getElementById('log-modal-title');
     const source = document.getElementById('log-modal-source');
     if (data.source === 'drone') {
@@ -162,12 +259,10 @@ function openLogModal(data) {
         source.textContent = 'Pin handmatig geplaatst door operator';
     }
 
-    // Coördinaten preview
     document.getElementById('log-modal-coords').textContent =
         data.lat.toFixed(7) + ', ' + data.lon.toFixed(7);
     document.getElementById('log-modal-alt').textContent = data.alt.toFixed(1);
 
-    // Defaults
     document.getElementById('log-modal-status').value = data.defaultStatus || '';
     document.getElementById('log-modal-notes').value  = '';
 
@@ -176,41 +271,45 @@ function openLogModal(data) {
 
 /**
  * Opslaan-knop in log-modal. Twee paden:
- *  - editingIndex !== null  → update bestaande entry, marker-popup verversen
- *  - editingIndex === null  → nieuwe entry toevoegen
+ *  - editingId !== null  → PUT bestaande entry, ververs marker-popup
+ *  - editingId === null  → POST nieuwe entry, voeg toe + marker
  */
-function confirmLogEntry() {
+async function confirmLogEntry() {
     if (!pendingEntry) return;
 
     const status = document.getElementById('log-modal-status').value;
     const notes  = document.getElementById('log-modal-notes').value.trim();
 
-    if (editingIndex !== null) {
-        // --- UPDATE bestaande entry ---
-        const entry = coordLog[editingIndex];
-        entry.status = status;
-        entry.notes  = notes;
-        // tijd/datum/lat/lon/source ongewijzigd — entry blijft historisch correct
+    if (editingId !== null) {
+        // --- UPDATE bestaande entry via PUT ---
+        const updated = await putEntry(editingId, { status, notes });
+        if (!updated) return;  // Toast al getoond door putEntry
 
-        // Vervang marker-popup met nieuwe inhoud
-        refreshMarkerPopup(editingIndex);
+        // Update lokale cache
+        const idx = coordLog.findIndex(e => e.id === editingId);
+        if (idx !== -1) {
+            coordLog[idx] = updated;
+            refreshMarkerPopup(updated.id, idx + 1);
+        }
 
-        editingIndex  = null;
-        pendingEntry  = null;
+        const oldId = editingId;
+        editingId    = null;
+        pendingEntry = null;
         window.hideModals();
         updateLogDisplay();
-        saveCoordLogToStorage();
-        window.showToast(`✏️ Entry #${entry ? coordLog.indexOf(entry) + 1 : ''} bijgewerkt`);
+
+        const displayNumber = (idx !== -1) ? (idx + 1) : '';
+        window.showToast(`✏️ Entry #${displayNumber} bijgewerkt`);
         return;
     }
 
-    // --- NIEUWE entry ---
+    // --- NIEUWE entry via POST ---
     const now  = new Date();
     const time = now.toLocaleTimeString('nl-BE', {
         hour: '2-digit', minute: '2-digit', second: '2-digit'
     });
 
-    const entry = {
+    const payload = {
         lat:    pendingEntry.lat,
         lon:    pendingEntry.lon,
         alt:    pendingEntry.alt,
@@ -221,20 +320,28 @@ function confirmLogEntry() {
         notes:  notes
     };
 
-    coordLog.push(entry);
-    placeMarker(entry, coordLog.length);
+    const created = await postEntry(payload);
+    if (!created) return;
+
+    coordLog.push(created);
+    placeMarker(created, coordLog.length);
 
     pendingEntry = null;
     window.hideModals();
     updateLogDisplay();
-    saveCoordLogToStorage();
     window.showToast(`📌 Entry #${coordLog.length} opgeslagen`);
 }
 
+
+// ============================================
+// MARKERS op de kaart
+// ============================================
+
 /**
  * Plaats een Leaflet marker met source-specifiek icoon en popup-info.
+ * Marker wordt opgeslagen in markersById onder de stabiele entry-id.
  */
-function placeMarker(entry, index) {
+function placeMarker(entry, displayNumber) {
     const map = window.getCurrentMap();
     const iconEmoji = entry.source === 'drone' ? '🚁' : '📍';
     const pinIcon = L.divIcon({
@@ -244,44 +351,51 @@ function placeMarker(entry, index) {
         iconAnchor: [10, 20]
     });
     const marker = L.marker([entry.lat, entry.lon], { icon: pinIcon }).addTo(map);
-logMarkers.push(marker);
-    let popupHtml = `<b>#${index}</b> ${iconEmoji} ${entry.source}<br>` +
-                    `${entry.lat.toFixed(7)}, ${entry.lon.toFixed(7)}<br>` +
-                    `Alt: ${entry.alt.toFixed(1)}m · ${entry.time}`;
-    if (entry.status) {
-        popupHtml += `<br><b>Status:</b> ${entry.status.replace('_', ' ')}`;
-    }
-    if (entry.notes) {
-        popupHtml += `<br><i>${escapeHtml(entry.notes)}</i>`;
-    }
-    marker.bindPopup(popupHtml);
+    markersById[entry.id] = marker;
+
+    marker.bindPopup(buildPopupHtml(entry, displayNumber));
 }
 
 /**
  * Update de popup-inhoud van een bestaande marker na een edit.
- * Marker zelf hoeft niet vervangen — alleen de popup wordt herschreven.
  */
-function refreshMarkerPopup(index) {
-    const marker = logMarkers[index];
+function refreshMarkerPopup(id, displayNumber) {
+    const marker = markersById[id];
     if (!marker) return;
-    const entry = coordLog[index];
-    const iconEmoji = entry.source === 'drone' ? '🚁' : '📍';
+    const entry = coordLog.find(e => e.id === id);
+    if (!entry) return;
+    marker.setPopupContent(buildPopupHtml(entry, displayNumber));
+}
 
-    let popupHtml = `<b>#${index + 1}</b> ${iconEmoji} ${entry.source}<br>` +
-                    `${entry.lat.toFixed(7)}, ${entry.lon.toFixed(7)}<br>` +
-                    `Alt: ${entry.alt.toFixed(1)}m · ${entry.time}`;
+/**
+ * Bouw de HTML-string voor een marker-popup. Gedeeld tussen placeMarker
+ * en refreshMarkerPopup zodat de stijl consistent blijft.
+ */
+function buildPopupHtml(entry, displayNumber) {
+    const iconEmoji = entry.source === 'drone' ? '🚁' : '📍';
+    let html = `<b>#${displayNumber}</b> ${iconEmoji} ${entry.source}<br>` +
+               `${entry.lat.toFixed(7)}, ${entry.lon.toFixed(7)}<br>` +
+               `Alt: ${entry.alt.toFixed(1)}m · ${entry.time}`;
     if (entry.status) {
-        popupHtml += `<br><b>Status:</b> ${entry.status.replace('_', ' ')}`;
+        html += `<br><b>Status:</b> ${entry.status.replace('_', ' ')}`;
     }
     if (entry.notes) {
-        popupHtml += `<br><i>${escapeHtml(entry.notes)}</i>`;
+        html += `<br><i>${escapeHtml(entry.notes)}</i>`;
     }
-    marker.setPopupContent(popupHtml);
+    return html;
 }
+
+
+// ============================================
+// LIJST-WEERGAVE rechts van de kaart
+// ============================================
 
 /**
  * Render de log-lijst. Nieuwste bovenaan. Source-icoon links, status-badge
  * inline naast tijd. Notitie als grijze italic onder de regel.
+ *
+ * Actie-knoppen gebruiken entry.id (niet array-index) als parameter zodat
+ * delete + concurrent edit niet de verkeerde entry raken.
  */
 function updateLogDisplay() {
     const container = document.getElementById('coord-log');
@@ -304,6 +418,9 @@ function updateLogDisplay() {
             statusBadge = `<span class="coord-status status-${e.status}">${e.status.replace('_', ' ')}</span>`;
         }
 
+        // entry.id wordt als string doorgegeven aan onclick handlers — quoten met "
+        const safeId = e.id.replace(/"/g, '\\"');
+
         html += `
         <div class="coord-entry">
             <div style="flex:1; min-width:0;">
@@ -313,16 +430,16 @@ function updateLogDisplay() {
                     ${statusBadge}
                 </div>
                 <div style="margin-top:3px;">
-                    <span class="coord-value" onclick="copyCoord(${i})" title="Klik om te kopiëren">${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}</span>
+                    <span class="coord-value" onclick="copyCoord('${safeId}')" title="Klik om te kopiëren">${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}</span>
                     <span class="coord-alt"> · ${e.alt.toFixed(1)}m</span>
                 </div>
                 ${e.notes ? `<div class="coord-notes">${escapeHtml(e.notes)}</div>` : ''}
             </div>
-        <div class="coord-actions">
-                <button class="coord-btn" onclick="editCoord(${i})" title="Bewerken">✏️</button>
-                <button class="coord-btn" onclick="copyCoord(${i})" title="Kopieer">📋</button>
+            <div class="coord-actions">
+                <button class="coord-btn" onclick="editCoord('${safeId}')" title="Bewerken">✏️</button>
+                <button class="coord-btn" onclick="copyCoord('${safeId}')" title="Kopieer">📋</button>
                 <a class="coord-btn" href="${gmapsUrl}" target="_blank" title="Open in Google Maps">🗺️</a>
-                <button class="coord-btn coord-btn-danger" onclick="deleteCoord(${i})" title="Verwijderen">🗑️</button>
+                <button class="coord-btn coord-btn-danger" onclick="deleteCoord('${safeId}')" title="Verwijderen">🗑️</button>
             </div>
         </div>`;
     }
@@ -330,8 +447,7 @@ function updateLogDisplay() {
 }
 
 /**
- * Simpele HTML-escape voor notitie-content (voorkomt XSS bij eventuele
- * externe data-import later).
+ * Simpele HTML-escape voor notitie-content (voorkomt XSS).
  */
 function escapeHtml(str) {
     const div = document.createElement('div');
@@ -339,8 +455,14 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
-function copyCoord(index) {
-    const e = coordLog[index];
+
+// ============================================
+// COPY / DELETE / CLEAR — acties op entries
+// ============================================
+
+function copyCoord(id) {
+    const e = coordLog.find(entry => entry.id === id);
+    if (!e) return;
     const text = `${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}`;
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -363,51 +485,54 @@ function fallbackCopy(text) {
 }
 
 /**
- * Verwijder één entry uit de log. Vraagt bevestiging, ruimt marker op,
- * herrendert lijst, syncschrijft naar localStorage.
- *
- * Nummers van entries onder de verwijderde schuiven op (entry #3 wordt
- * #2 enz). Dat is acceptabel voor visuele presentatie — voor een echte
- * stabiele identificatie zou later een UUID per entry nodig zijn.
+ * Verwijder één entry. DELETE op server, dan lokale cache + marker.
  */
-function deleteCoord(index) {
-    if (index < 0 || index >= coordLog.length) return;
-    if (!confirm(`Entry #${index + 1} verwijderen?`)) return;
+async function deleteCoord(id) {
+    const idx = coordLog.findIndex(e => e.id === id);
+    if (idx === -1) return;
+    if (!confirm(`Entry #${idx + 1} verwijderen?`)) return;
 
-    // Verwijder marker van kaart
+    const ok = await deleteEntry(id);
+    if (!ok) return;
+
+    // Verwijder marker
     const map = window.getCurrentMap();
-    if (logMarkers[index]) {
-        map.removeLayer(logMarkers[index]);
+    if (markersById[id]) {
+        map.removeLayer(markersById[id]);
+        delete markersById[id];
     }
-    logMarkers.splice(index, 1);
 
-    // Verwijder entry uit array
-    coordLog.splice(index, 1);
+    // Verwijder uit lokale cache
+    coordLog.splice(idx, 1);
 
-    saveCoordLogToStorage();
     updateLogDisplay();
     window.showToast('Entry verwijderd');
 }
 
-function clearLog() {
+/**
+ * Wis alle entries via DELETE /api/log. Ruim markers en lokale state op.
+ */
+async function clearLog() {
     if (coordLog.length === 0) return;
-    if (confirm('Alle gelogde coördinaten wissen?\n\nDit verwijdert ze permanent (ook na refresh).')) {
-        // Verwijder markers van de kaart
-        const map = window.getCurrentMap();
-        logMarkers.forEach(m => map.removeLayer(m));
-        logMarkers = [];
+    if (!confirm('Alle gelogde coördinaten wissen?\n\nDit verwijdert ze permanent (server-side).')) return;
 
-        coordLog = [];
-        saveCoordLogToStorage();
-        updateLogDisplay();
-        window.showToast('Log gewist');
-    }
+    const ok = await deleteAllEntries();
+    if (!ok) return;
+
+    const map = window.getCurrentMap();
+    Object.values(markersById).forEach(m => map.removeLayer(m));
+    markersById = {};
+
+    coordLog = [];
+    updateLogDisplay();
+    window.showToast('Log gewist');
 }
 
-/**
- * Toon export-modal met selectie-UI. Default: niets geselecteerd —
- * operator kiest expliciet (email-inbox patroon).
- */
+
+// ============================================
+// EXCEL EXPORT — selectie-modal
+// ============================================
+
 function exportLog() {
     if (coordLog.length === 0) {
         window.showToast('Geen entries om te exporteren');
@@ -417,11 +542,6 @@ function exportLog() {
     document.getElementById('export-modal').classList.add('show');
 }
 
-/**
- * Bouw de selectie-lijst in de export-modal. Wordt opnieuw aangeroepen
- * bij elke modal-open zodat nieuwe entries verschijnen en gewijzigde
- * statussen bijgewerkt zijn.
- */
 function buildExportList() {
     const container = document.getElementById('export-entries');
     document.getElementById('export-select-all').checked = false;
@@ -452,10 +572,6 @@ function buildExportList() {
     updateExportCounter();
 }
 
-/**
- * Bijwerken van counter "X van Y geselecteerd" + enable/disable van
- * download-knop. Wordt aangeroepen bij elke checkbox-wijziging.
- */
 function updateExportCounter() {
     const checkboxes = document.querySelectorAll('.export-checkbox');
     const checked = document.querySelectorAll('.export-checkbox:checked');
@@ -466,15 +582,10 @@ function updateExportCounter() {
         `${selected} van ${total} geselecteerd`;
     document.getElementById('export-confirm-btn').disabled = (selected === 0);
 
-    // Sync "Alles selecteren" checkbox met huidige toestand
     const selectAll = document.getElementById('export-select-all');
     selectAll.checked = (selected === total && total > 0);
 }
 
-/**
- * Wanneer "Alles selecteren" wordt aan- of uitgevinkt, propageer naar
- * alle entry-checkboxes.
- */
 function toggleSelectAllExport() {
     const checked = document.getElementById('export-select-all').checked;
     document.querySelectorAll('.export-checkbox').forEach(cb => {
@@ -483,11 +594,6 @@ function toggleSelectAllExport() {
     updateExportCounter();
 }
 
-/**
- * Verzamel geselecteerde entries en POST naar backend voor XLSX-generatie.
- * Bestand wordt door browser gedownload via blob-URL met Belgische datum
- * in de bestandsnaam.
- */
 async function confirmExport() {
     const indices = Array.from(document.querySelectorAll('.export-checkbox:checked'))
         .map(cb => parseInt(cb.dataset.index, 10));
@@ -511,7 +617,6 @@ async function confirmExport() {
             throw new Error(`Server error: ${response.status}`);
         }
 
-        // Trigger browser-download van de binary blob
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -530,7 +635,7 @@ async function confirmExport() {
 }
 
 /**
- * Bouw bestandsnaam in Belgische datum-notatie:
+ * Belgische datum-notatie voor bestandsnaam:
  *   vespatrack_log_20-05-2026_17h30.xlsx
  */
 function buildExportFilename() {
@@ -543,30 +648,35 @@ function buildExportFilename() {
     return `vespatrack_log_${dd}-${mm}-${yyyy}_${hh}h${min}.xlsx`;
 }
 
-/**
- * Annuleer de log-modal. Reset edit-state zodat een volgende open een
- * nieuwe entry-flow start in plaats van per ongeluk in edit-modus te staan.
- */
+
+// ============================================
+// MODAL ANNULEREN — reset edit-state
+// ============================================
+
 function cancelLogEntry() {
-    editingIndex = null;
+    editingId    = null;
     pendingEntry = null;
     window.hideModals();
 }
 
-// Expose op window
-window.logCoordinate    = logCoordinate;
-window.handleMapClick   = handleMapClick;
-window.openLogModal     = openLogModal;
-window.confirmLogEntry  = confirmLogEntry;
-window.updateLogDisplay = updateLogDisplay;
-window.copyCoord        = copyCoord;
-window.clearLog         = clearLog;
-window.exportLog        = exportLog;
-window.loadCoordLogFromStorage = loadCoordLogFromStorage;
-window.editCoord       = editCoord;
-window.cancelLogEntry  = cancelLogEntry;
-window.buildExportList         = buildExportList;
-window.updateExportCounter     = updateExportCounter;
-window.toggleSelectAllExport   = toggleSelectAllExport;
-window.confirmExport           = confirmExport;
-window.deleteCoord = deleteCoord;
+
+// ============================================
+// WINDOW EXPORTS
+// ============================================
+
+window.initCoordLogFromServer = initCoordLogFromServer;
+window.logCoordinate          = logCoordinate;
+window.handleMapClick         = handleMapClick;
+window.openLogModal           = openLogModal;
+window.confirmLogEntry        = confirmLogEntry;
+window.updateLogDisplay       = updateLogDisplay;
+window.copyCoord              = copyCoord;
+window.clearLog               = clearLog;
+window.exportLog              = exportLog;
+window.editCoord              = editCoord;
+window.deleteCoord            = deleteCoord;
+window.cancelLogEntry         = cancelLogEntry;
+window.buildExportList        = buildExportList;
+window.updateExportCounter    = updateExportCounter;
+window.toggleSelectAllExport  = toggleSelectAllExport;
+window.confirmExport          = confirmExport;
