@@ -54,10 +54,20 @@ function registerCoreSocketHandlers() {
         // In een volgende commit komt dit terug als status in de navbar.
         console.warn('[socket] Pi connection lost');
     });
-    // ============================================
+
+
+ // ============================================
     // STATUS_UPDATE — dispatcher
     // ============================================
     window.socket.on('status_update', dispatchStatusUpdate);
+
+    // ============================================
+    // THERMAL_FRAME — apart event om payload klein te houden
+    // ============================================
+    // Backend pusht ~6-7x per seconde een nieuw frame (32x24 floats).
+    // Wordt afgehandeld door thermal-display.js dat het op het canvas
+    // rendert met Iron palette en de stats-regel bijwerkt.
+    window.socket.on('thermal_frame', window.handleThermalFrame);
 }
 
 /**
