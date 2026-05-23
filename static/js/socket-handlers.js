@@ -61,13 +61,15 @@ function registerCoreSocketHandlers() {
     // ============================================
     window.socket.on('status_update', dispatchStatusUpdate);
 
-    // ============================================
+ // ============================================
     // THERMAL_FRAME — apart event om payload klein te houden
     // ============================================
-    // Backend pusht ~6-7x per seconde een nieuw frame (32x24 floats).
-    // Wordt afgehandeld door thermal-display.js dat het op het canvas
-    // rendert met Iron palette en de stats-regel bijwerkt.
     window.socket.on('thermal_frame', window.handleThermalFrame);
+
+    // ============================================
+    // THERMAL_BASELINE_RESULT — feedback na set/clear actie
+    // ============================================
+    window.socket.on('thermal_baseline_result', window.handleThermalBaselineResult);
 }
 
 /**

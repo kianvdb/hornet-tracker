@@ -234,6 +234,20 @@
                             <span class="thermal-stat-value" id="thermal-fps-val">--</span>
                         </div>
                     </div>
+                    <div class="thermal-controls">
+                        <button id="thermal-baseline-set-btn" class="thermal-btn"
+                                onclick="window.setThermalBaseline()">
+                            📍 Baseline instellen
+                        </button>
+                        <button id="thermal-mode-toggle-btn" class="thermal-btn thermal-btn-toggle"
+                                onclick="window.toggleThermalMode()" disabled>
+                            <span id="thermal-mode-label">Normaal</span>
+                        </button>
+                        <button id="thermal-baseline-clear-btn" class="thermal-btn thermal-btn-danger"
+                                onclick="window.clearThermalBaseline()" disabled>
+                            🗑️ Wissen
+                        </button>
+                    </div>
                     <div class="thermal-no-signal" id="thermal-no-signal">
                         Wachten op camera...
                     </div>

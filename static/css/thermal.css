@@ -72,3 +72,64 @@
     font-style: italic;
     pointer-events: none;
 }
+
+/* ============================================
+   THERMAL — Baseline / detectie-modus knoppen
+   ============================================ */
+
+.thermal-controls {
+    display: grid;
+    grid-template-columns: 2fr 1.4fr 1fr;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.thermal-btn {
+    background: #0f3460;
+    color: #eee;
+    border: 1px solid #1a4571;
+    border-radius: 4px;
+    padding: 8px 6px;
+    font-size: 0.85em;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    font-family: inherit;
+}
+
+.thermal-btn:hover:not(:disabled) {
+    background: #1a4571;
+    border-color: #f5a623;
+}
+
+.thermal-btn:active:not(:disabled) {
+    background: #082040;
+}
+
+.thermal-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Toggle-knop: extra accent wanneer in detectie-modus */
+.thermal-btn-toggle.active {
+    background: #f5a623;
+    color: #16213e;
+    border-color: #f5a623;
+}
+
+.thermal-btn-toggle.active:hover:not(:disabled) {
+    background: #ffb733;
+    border-color: #ffb733;
+}
+
+/* Wissen-knop: rode tint */
+.thermal-btn-danger {
+    background: #4a1f1f;
+    border-color: #6a2a2a;
+}
+
+.thermal-btn-danger:hover:not(:disabled) {
+    background: #6a2a2a;
+    border-color: #ef4444;
+}

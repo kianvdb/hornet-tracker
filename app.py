@@ -67,7 +67,7 @@ WIFI_HOTSPOT_IFACE = 'wlan1'
 # --- Thermal camera (Pimoroni MLX90640 op I2C) ---
 # Refresh rate: 16 Hz = effectief ~8 FPS na I2C-overhead.
 # Bij issues (skipped frames, "Too many retries"): verlaag naar 8 of 4.
-THERMAL_REFRESH_HZ = 16
+THERMAL_REFRESH_HZ = 8
 THERMAL_EMIT_INTERVAL = 0.15  # max ~6-7 emits/sec naar dashboard
 
 # --- Persistente log storage ---
@@ -135,13 +135,22 @@ status = {
 
     # Thermal camera status (frame-data wordt apart via 'thermal_frame' emit gestuurd
     # om de status_update payload klein te houden)
-    'thermal_connected': False,
+'thermal_connected': False,
     'thermal_min': 0.0,
     'thermal_max': 0.0,
     'thermal_avg': 0.0,
     'thermal_fps': 0.0,
+    # Baseline detectie-modus: operator drukt op "baseline instellen" knop
+    # in dashboard om het huidige frame als referentie op te slaan. Daarna
+    # kan de frontend kiezen om alleen pixels te tonen die boven baseline liggen.
+    'thermal_baseline_set': False,
 }
 
+
+# Baseline frame buiten status dict — 768 floats hoort niet in status_update payload.
+# Wordt meegestuurd in thermal_frame events zodra ingesteld.
+thermal_baseline = None  # None of list[768] floats
+_last_thermal_frame = None  # laatst gelezen frame, voor baseline-capture
 baseline_reset_requested = False
 
 # Globale MAVLink connectie - gezet door mavlink_loop() na succesvolle connect.
@@ -792,6 +801,11 @@ def thermal_loop():
         try:
             mlx.getFrame(frame)
             fail_count = 0  # reset bij succes
+            
+            # Bewaar laatste frame voor baseline-capture handler.
+            # Module-scope zodat de Socket.io handlers erbij kunnen.
+            global _last_thermal_frame
+            _last_thermal_frame = list(frame)
 
             now = time.time()
             frame_times.append(now)
@@ -821,12 +835,16 @@ def thermal_loop():
                 # Emit frame als aparte event om status_update klein te houden.
                 # Frame is een lijst van 768 floats met 1 decimaal afgerond
                 # zodat JSON-grootte ~5 KB blijft i.p.v. ~15 KB.
+                #
+                # Baseline wordt meegestuurd in elke emit zodat de frontend altijd
+                # weet of detectie-modus mogelijk is. None als nog niet ingesteld.
                 socketio.emit('thermal_frame', {
                     'data': [round(v, 1) for v in frame],
                     'min': status['thermal_min'],
                     'max': status['thermal_max'],
                     'avg': status['thermal_avg'],
                     'fps': status['thermal_fps'],
+                    'baseline': thermal_baseline,
                 })
 
         except (ValueError, RuntimeError) as e:
@@ -1319,6 +1337,45 @@ def handle_reset_baseline():
     global baseline_reset_requested
     print('Baseline reset aangevraagd')
     baseline_reset_requested = True
+
+    # ============================================
+# THERMAL BASELINE HANDLERS (detectie-modus)
+# ============================================
+
+@socketio.on('thermal_baseline_set')
+def handle_thermal_baseline_set():
+    """
+    Operator drukt op 'baseline instellen'. We slaan een snapshot op van het
+    laatste frame dat thermal_loop heeft gelezen. Frontend gebruikt die
+    snapshot daarna om verschil-rendering te doen (alleen pixels boven baseline).
+    """
+    global thermal_baseline
+    if _last_thermal_frame is None:
+        socketio.emit('thermal_baseline_result', {
+            'success': False,
+            'message': 'Geen thermisch beeld beschikbaar'
+        })
+        return
+    thermal_baseline = list(_last_thermal_frame)
+    status['thermal_baseline_set'] = True
+    print(f"Thermal baseline ingesteld op {len(thermal_baseline)} pixels")
+    socketio.emit('thermal_baseline_result', {
+        'success': True,
+        'message': 'Baseline ingesteld'
+    })
+
+
+@socketio.on('thermal_baseline_clear')
+def handle_thermal_baseline_clear():
+    """Wis baseline — frontend gaat terug naar normale rendering."""
+    global thermal_baseline
+    thermal_baseline = None
+    status['thermal_baseline_set'] = False
+    print("Thermal baseline gewist")
+    socketio.emit('thermal_baseline_result', {
+        'success': True,
+        'message': 'Baseline gewist'
+    })
 
 # ============================================
 # DRONE COMMAND HANDLERS (frontend → Pixhawk)
