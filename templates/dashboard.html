@@ -136,7 +136,7 @@
 
 
        <div class="navbar-actions">
-        <button class="navbar-action-btn" onclick="openTileCacheModal()" title="Offline kaart-tiles beheren">
+        <button class="navbar-btn" onclick="openTileCacheModal()" title="Offline kaart-tiles beheren">
                 🗺️ Offline kaart
             </button>
             <button class="navbar-btn" onclick="showRebootModal()" title="Herstart Pi">
@@ -213,7 +213,34 @@
             </div>
 
           <div class="card">
-                <h2>🌡️ Thermisch Beeld</h2>
+                <div class="thermal-header">
+                    <h2>🌡️ Thermisch Beeld</h2>
+                    <div class="thermal-palette-dropdown" id="thermal-palette-dropdown">
+                        <button class="thermal-palette-trigger" id="thermal-palette-trigger"
+                                onclick="window.toggleThermalPaletteMenu(event)">
+                            <span id="thermal-palette-trigger-label">🔥 Iron</span>
+                            <span class="thermal-palette-arrow">▼</span>
+                        </button>
+                        <ul class="thermal-palette-menu" id="thermal-palette-menu">
+                            <li class="thermal-palette-option active" data-value="iron"
+                                onclick="window.selectThermalPalette('iron', '🔥 Iron')">
+                                🔥 Iron
+                            </li>
+                            <li class="thermal-palette-option" data-value="inferno"
+                                onclick="window.selectThermalPalette('inferno', '🌋 Inferno')">
+                                🌋 Inferno
+                            </li>
+                            <li class="thermal-palette-option" data-value="grayscale"
+                                onclick="window.selectThermalPalette('grayscale', '⬜ Grijswaarden')">
+                                ⬜ Grijswaarden
+                            </li>
+                            <li class="thermal-palette-option" data-value="rainbow"
+                                onclick="window.selectThermalPalette('rainbow', '🌈 Rainbow')">
+                                🌈 Rainbow
+                            </li>
+                        </ul>
+                    </div>
+                </div>
                 <div class="thermal-container">
                     <canvas id="thermal-canvas" width="320" height="240"></canvas>
                     <div class="thermal-stats">

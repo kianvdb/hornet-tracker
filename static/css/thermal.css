@@ -133,3 +133,111 @@
     background: #6a2a2a;
     border-color: #ef4444;
 }
+
+/* ============================================
+   THERMAL — Header met palette dropdown
+   ============================================ */
+
+.thermal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.thermal-header h2 {
+    margin: 0;
+}
+
+/* ============================================
+   Custom palette dropdown
+   ============================================ */
+
+.thermal-palette-dropdown {
+    position: relative;
+    user-select: none;
+}
+
+.thermal-palette-trigger {
+    background: #0f3460;
+    color: #eee;
+    border: 1px solid #1a4571;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 0.85em;
+    font-weight: bold;
+    cursor: pointer;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 140px;
+    justify-content: space-between;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.thermal-palette-trigger:hover {
+    background: #1a4571;
+    border-color: #f5a623;
+}
+
+.thermal-palette-dropdown.open .thermal-palette-trigger {
+    border-color: #f5a623;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.thermal-palette-arrow {
+    color: #f5a623;
+    font-size: 0.7em;
+    transition: transform 0.15s;
+}
+
+.thermal-palette-dropdown.open .thermal-palette-arrow {
+    transform: rotate(180deg);
+}
+
+.thermal-palette-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    background: #16213e;
+    border: 1px solid #f5a623;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    z-index: 100;
+    display: none;
+    overflow: hidden;
+}
+
+.thermal-palette-dropdown.open .thermal-palette-menu {
+    display: block;
+}
+
+.thermal-palette-option {
+    padding: 8px 10px;
+    color: #eee;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: bold;
+    transition: background 0.1s;
+}
+
+.thermal-palette-option:hover {
+    background: #1a4571;
+    color: #f5a623;
+}
+
+.thermal-palette-option.active {
+    background: #0f3460;
+    color: #f5a623;
+}
+
+.thermal-palette-option.active:hover {
+    background: #1a4571;
+}
