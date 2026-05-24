@@ -8,7 +8,8 @@ Technologie.
 De drone — VespaTrack — draagt een RF-ontvanger en patrouilleert door
 een gebied terwijl ze het signaal volgt van een kleine LoRa-beacon die
 op een testobject is geplakt. Het grondstation toont in real-time de
-drone-positie op een satellietkaart, het ontvangen signaal, en biedt
+drone-positie op een satellietkaart, het ontvangen signaal, een
+thermisch beeld voor visuele bevestiging op korte afstand, en biedt
 bediening van de vlucht.
 
 ---
@@ -23,6 +24,7 @@ bediening van de vlucht.
 - [Projectstructuur](#projectstructuur)
 - [Netwerktoegang](#netwerktoegang)
 - [Offline veldwerk](#offline-veldwerk)
+- [Thermisch beeld](#thermisch-beeld)
 - [Ontwikkelen](#ontwikkelen)
 - [Roadmap](#roadmap)
 - [Licentie](#licentie)
@@ -75,8 +77,12 @@ de Pixhawk.
 
 ### Sensoren
 
-- **Pimoroni MLX90640 55°** — thermische camera (32×24 pixels) voor
-  visuele bevestiging van nest op korte afstand
+- **Pimoroni MLX90640 55°** — thermische camera (32×24 pixels) op I2C bus 1.
+  Default-adres `0x33`. I2C bus draait op 400 kHz
+  (`dtparam=i2c_arm_baudrate=400000` in `/boot/firmware/config.txt`).
+  Refresh-rate `REFRESH_8_HZ` (effectief ~4 FPS over de bus) — geeft
+  stabiele frames zonder I2C glitches. De camera levert visuele
+  bevestiging van een nest op korte afstand.
 
 ### Communicatie
 
@@ -89,15 +95,19 @@ de Pixhawk.
 ## Software stack
 
 - **Backend** — Python 3, Flask, Flask-SocketIO met threading async mode,
-  threading-based background loops voor signal/wifi/mavlink
+  threading-based background loops voor signal/wifi/mavlink/thermal
 - **MAVLink** — pymavlink, bidirectioneel: telemetrie ontvangen
   (GPS, batterij, mode, armed) én commando's sturen (arm/disarm/mode)
 - **RF-detectie** — pyrtlsdr met FFT-based energy detection, baseline
   + peak-hold detectie
+- **Thermische camera** — Adafruit CircuitPython MLX90640 library via
+  I2C, frame-stream via aparte Socket.io `thermal_frame` event om de
+  status-payload klein te houden
 - **Excel-export** — openpyxl voor server-side generatie van
   gestileerde XLSX-bestanden uit log-entries
 - **Frontend** — vanilla JavaScript (geen build-step), Leaflet voor de
-  kaart (lokaal gehost), fetch-API voor REST-calls naar de backend
+  kaart (lokaal gehost), Canvas voor thermische rendering, fetch-API
+  voor REST-calls naar de backend
 - **Offline tiles** — Flask-route serveert lokaal gecachte map-tiles
   uit `data/tiles/`, met internet-fallback bij cache-miss
 - **Adres-geocoding** — Nominatim API (OpenStreetMap) voor adres → lat/lon
@@ -122,8 +132,9 @@ cd hornet-tracker
 
 ```bash
 sudo apt update
-sudo apt install python3-pip git
+sudo apt install python3-pip git i2c-tools
 pip3 install -r requirements.txt
+pip3 install adafruit-circuitpython-mlx90640 --break-system-packages
 ```
 
 Het bestand `requirements.txt` ligt in de root van het project en bevat:
@@ -137,7 +148,27 @@ numpy
 openpyxl
 ```
 
-### 3. Systemd service registreren
+### 3. I2C activeren voor thermische camera
+
+I2C is op de Pi standaard uitgeschakeld. Activeren via raspi-config of
+direct in `/boot/firmware/config.txt`:
+
+```bash
+sudo nano /boot/firmware/config.txt
+# Zoek/voeg toe:
+dtparam=i2c_arm=on,i2c_arm_baudrate=400000
+
+sudo reboot
+```
+
+Verifieer dat de MLX90640 op de bus zichtbaar is:
+
+```bash
+sudo i2cdetect -y 1
+# Verwacht: '33' in het 16x16 raster
+```
+
+### 4. Systemd service registreren
 
 `systemd` is het service-management systeem van Linux dat ervoor zorgt
 dat het dashboard automatisch start bij boot en herstart na een crash.
@@ -171,7 +202,7 @@ sudo systemctl start hornet-tracker
 
 Vanaf nu start het dashboard automatisch bij elke boot van de Pi.
 
-### 4. Udev-rule voor Pixhawk
+### 5. Udev-rule voor Pixhawk
 
 Zodat de Pixhawk altijd verschijnt als `/dev/ttyPixhawk` in plaats van
 een wisselende `/dev/ttyUSB0`:
@@ -188,7 +219,7 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-### 5. Comfast hotspot configureren (optioneel, voor veldwerk)
+### 6. Comfast hotspot configureren (optioneel, voor veldwerk)
 
 Voor veldgebruik zonder router maakt de Pi een eigen WiFi-hotspot via
 de Comfast MT7612U USB-adapter op `wlan1`. NetworkManager regelt dit:
@@ -230,7 +261,8 @@ sudo journalctl -u hornet-tracker -f     # live logs volgen
 hornet-tracker/
 ├── app.py                          Flask + Socket.io backend, MAVLink,
 │                                   RTL-SDR, WiFi status, command handlers,
-│                                   Excel-export endpoint, tile-cache routes
+│                                   thermal camera loop, Excel-export endpoint,
+│                                   tile-cache routes
 ├── prefetch_tiles.py               CLI tool: bulk-download tiles voor offline gebruik
 ├── README.md                       dit bestand
 ├── requirements.txt                Python dependencies
@@ -264,7 +296,8 @@ hornet-tracker/
     │   ├── map.css                 Leaflet kaart + GPS-waiting badge
     │   ├── coord-log.css           gelogde coördinaten + status badges + toast
     │   ├── controls.css            knoppen + modals + log/export/tile-cache modals
-    │   └── thermal.css             warmtecamera (in voorbereiding)
+    │   └── thermal.css             warmtecamera canvas + stats + baseline-knoppen
+    │                               + palette dropdown
     │
     └── js/                         modulaire JavaScript per concern
         ├── utils.js                rssi helpers, toast, card status
@@ -273,6 +306,8 @@ hornet-tracker/
         │                           edit, delete, REST naar backend, Excel-export
         ├── drone-controls.js       arm/disarm/mode + command result handler
         ├── signal-display.js       LoRa signal card + baseline reset
+        ├── thermal-display.js      MLX90640 canvas rendering + Iron/Inferno/
+        │                           Grayscale/Rainbow paletten + baseline detectie
         ├── navbar.js               popover toggle + click-outside-to-close
         ├── socket-handlers.js      connect/disconnect/status_update dispatch
         ├── modals.js               shutdown/reboot/arm/log/export/tile-cache dialogen
@@ -285,7 +320,8 @@ hornet-tracker/
 `dashboard.html` laadt de JS-modules in deze volgorde:
 
 1. `utils.js`, `map.js`, `coord-log.js`, `drone-controls.js`,
-   `signal-display.js` — definiëren functies op `window`, geen socket nodig.
+   `signal-display.js`, `thermal-display.js` — definiëren functies op
+   `window`, geen socket nodig.
 2. `socket-handlers.js` — handlers die `window.socket` gebruiken.
 3. `modals.js` — dialog-logica voor alle modals.
 4. `tile-cache.js` — offline tiles UI + Nominatim adres-zoek.
@@ -398,18 +434,75 @@ daadwerkelijk bezoekt, naast gerichte prefetch.
 
 ---
 
+## Thermisch beeld
+
+Het dashboard toont het live thermisch beeld van de MLX90640 sensor
+op de drone. Het beeld is 32×24 pixels native, upscaled naar 320×240
+op het canvas met nearest-neighbor scaling (geen blur, scherpe pixels).
+Onder het beeld staan vier waarden: Min / Gem / Max temperatuur in °C
+en de actuele FPS.
+
+### Render-modi
+
+Twee complementaire modi waar de operator tussen kan wisselen:
+
+**Normaal** (default) — hybride scaling.
+
+Bij voldoende temperatuur-spreiding in de scène (≥ 15°C tussen koudste
+en warmste pixel) auto-scalen we het palette op die range — maximaal
+contrast. Bij minder spreiding (uniforme scène zoals lege weide of
+plafond) gebruiken we een vaste range van 15°C gecentreerd op het
+gemiddelde, zodat sensor-ruis niet als nep-warmte-vlekken verschijnt.
+Geschikt voor algemene observatie.
+
+**Detectie** — verschil tov baseline.
+
+Operator drukt op "Baseline instellen" om de huidige scène als
+referentie op te slaan. Vanaf dan toont het beeld alleen pixels die
+boven baseline liggen — pixels op of onder baseline worden zwart.
+Geschikt voor gerichte hot-spot zoektocht: drone vliegt over een
+gebied, baseline is de "normale" omgeving, en alleen nieuwe warmere
+objecten (een nest, een dier) lichten op tegen zwarte achtergrond.
+
+### Palette-keuze
+
+Vier paletten beschikbaar via dropdown rechts in de card-header:
+
+- **🔥 Iron** (default) — klassieke thermal cam look, paars → rood →
+  geel → wit
+- **🌋 Inferno** — matplotlib wetenschappelijk standaard, zwart →
+  paars → rood → geel
+- **⬜ Grijswaarden** — geprint/thesis-rapport vriendelijk, zwart → wit
+- **🌈 Rainbow** — oude FLIR-stijl, blauw → groen → geel → rood
+
+Switchen heeft geen reload nodig — het volgende frame (binnen ~150ms)
+gebruikt automatisch de nieuwe palette.
+
+### Performance
+
+I2C-bus op 400 kHz, sensor refresh-rate op 8 Hz (config in `app.py`).
+Backend leest ~4 frames per seconde succesvol; bij hogere instellingen
+treden I2C-glitches op die de stream onderbreken. Bij 50+ skipped
+frames detecteert de loop dat en herverbindt automatisch met de
+sensor — geen handmatig ingrijpen nodig.
+
+Frames worden gerate-limit naar de browser (max 6-7 emits/sec) en
+gerond op 1 decimaal, zodat de JSON-payload ~5 KB per frame blijft.
+
+---
+
 ## Ontwikkelen
 
 ### Git branch-strategie
 
-Hoofdbranch: `main` — stabiele werkende versie.
+Hoofdbranch: `master` — stabiele werkende versie.
 
 Per feature een aparte branch:
 
 ```bash
 git checkout -b feature/<beschrijving>
 # ...werken en committen...
-git checkout main
+git checkout master
 git merge --no-ff feature/<beschrijving>
 ```
 
@@ -434,10 +527,12 @@ feature inzoomen op de chronologie van een onderdeel.
   platform integratie
 - `feature/offline-tiles` — vendor Leaflet + tile-cache route + CLI
   prefetch-tool + cache-management UI met adres-zoek via Nominatim
+- `feature/thermal-camera` — Pimoroni MLX90640 via I2C, Socket.io
+  frame-stream, canvas-rendering met vier paletten, normaal + baseline
+  detectie-modus
 
 **Lopende (wacht op hardware):**
 
-- `feature/thermal-camera` — Pimoroni MLX90640 integratie via I2C
 - `feature/lora-packet-decoding` — Ra-01 SX1278 in productie zetten ter
   vervanging van RTL-SDR energy detection
 
@@ -516,13 +611,22 @@ incrementele stap zonder dependencies te hoeven introduceren.
   - Adres-zoeken via Nominatim (OpenStreetMap geocoder) voor gemakkelijke
     selectie van prefetch-gebieden
   - Live progress-bar tijdens prefetch via status-polling
+- Thermisch beeld in dashboard:
+  - Pimoroni MLX90640 via I2C, Adafruit CircuitPython library
+  - Backend thermal_loop met auto-reconnect bij I2C-glitches
+  - Frame-stream via aparte Socket.io `thermal_frame` event (~5 KB payload)
+  - Canvas-rendering met nearest-neighbor upscaling (scherpe pixels)
+  - Hybride scaling die ruis-amplificatie in uniforme scènes voorkomt
+  - Vier paletten: Iron, Inferno, Grijswaarden, Rainbow (custom dropdown)
+  - Baseline detectie-modus: snapshot huidige scène, daarna alleen
+    afwijkingen tonen — geschikt voor hot-spot zoektocht
+  - Min/Gem/Max/FPS statistieken altijd zichtbaar
 
 ### In planning
 
-- MLX90640 warmtecamera integratie via I2C (Pimoroni 55° onderweg)
 - Ra-01 LoRa-pakketdecodering ter vervanging van RTL-SDR energy detection
-- Layout-finetuning na thermal- en LoRa-integratie zodat alle cards
-  exact passen op 1920 × 1080 zonder scrollen
+- Layout-finetuning na LoRa-integratie zodat alle cards exact passen
+  op 1920 × 1080 zonder scrollen
 - Besturing card collapse-toggle (mode-knoppen verbergen tijdens vlucht
   om ruimte vrij te maken voor kaart en warmtebeeld)
 
@@ -536,6 +640,9 @@ incrementele stap zonder dependencies te hoeven introduceren.
   thesis-rapport.
 - Auto-discovery van nestlocatie op basis van signaal-piek + GPS-positie
   correlatie
+- Computer-vision op het thermische beeld voor automatische
+  nest-detectie (warm cluster van ≥ N pixels boven baseline → markeer
+  positie op kaart)
 
 ---
 
