@@ -136,8 +136,8 @@
 
 
        <div class="navbar-actions">
-        <button class="navbar-action-btn" onclick="openTileCacheModal()" title="Offline kaart-tiles beheren">
-                🗺️
+        <button class="navbar-btn" onclick="openTileCacheModal()" title="Offline kaart-tiles beheren">
+                🗺️ Offline kaart
             </button>
             <button class="navbar-btn" onclick="showRebootModal()" title="Herstart Pi">
                 🔄 Herstart
@@ -212,9 +212,73 @@
                 </div>
             </div>
 
-            <div class="card">
-                <h2>🌡️ Thermisch Beeld</h2>
-                <div class="thermal-placeholder">MLX90640 (later)</div>
+          <div class="card">
+                <div class="thermal-header">
+                    <h2>🌡️ Thermisch Beeld</h2>
+                    <div class="thermal-palette-dropdown" id="thermal-palette-dropdown">
+                        <button class="thermal-palette-trigger" id="thermal-palette-trigger"
+                                onclick="window.toggleThermalPaletteMenu(event)">
+                            <span id="thermal-palette-trigger-label">🔥 Iron</span>
+                            <span class="thermal-palette-arrow">▼</span>
+                        </button>
+                        <ul class="thermal-palette-menu" id="thermal-palette-menu">
+                            <li class="thermal-palette-option active" data-value="iron"
+                                onclick="window.selectThermalPalette('iron', '🔥 Iron')">
+                                🔥 Iron
+                            </li>
+                            <li class="thermal-palette-option" data-value="inferno"
+                                onclick="window.selectThermalPalette('inferno', '🌋 Inferno')">
+                                🌋 Inferno
+                            </li>
+                            <li class="thermal-palette-option" data-value="grayscale"
+                                onclick="window.selectThermalPalette('grayscale', '⬜ Grijswaarden')">
+                                ⬜ Grijswaarden
+                            </li>
+                            <li class="thermal-palette-option" data-value="rainbow"
+                                onclick="window.selectThermalPalette('rainbow', '🌈 Rainbow')">
+                                🌈 Rainbow
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="thermal-container">
+                    <canvas id="thermal-canvas" width="320" height="240"></canvas>
+                    <div class="thermal-stats">
+                        <div class="thermal-stat">
+                            <span class="thermal-stat-label">Min</span>
+                            <span class="thermal-stat-value" id="thermal-min-val">--</span>
+                        </div>
+                        <div class="thermal-stat">
+                            <span class="thermal-stat-label">Gem</span>
+                            <span class="thermal-stat-value" id="thermal-avg-val">--</span>
+                        </div>
+                        <div class="thermal-stat">
+                            <span class="thermal-stat-label">Max</span>
+                            <span class="thermal-stat-value thermal-max" id="thermal-max-val">--</span>
+                        </div>
+                        <div class="thermal-stat">
+                            <span class="thermal-stat-label">FPS</span>
+                            <span class="thermal-stat-value" id="thermal-fps-val">--</span>
+                        </div>
+                    </div>
+                    <div class="thermal-controls">
+                        <button id="thermal-baseline-set-btn" class="thermal-btn"
+                                onclick="window.setThermalBaseline()">
+                            📍 Baseline instellen
+                        </button>
+                        <button id="thermal-mode-toggle-btn" class="thermal-btn thermal-btn-toggle"
+                                onclick="window.toggleThermalMode()" disabled>
+                            <span id="thermal-mode-label">Normaal</span>
+                        </button>
+                        <button id="thermal-baseline-clear-btn" class="thermal-btn thermal-btn-danger"
+                                onclick="window.clearThermalBaseline()" disabled>
+                            🗑️ Wissen
+                        </button>
+                    </div>
+                    <div class="thermal-no-signal" id="thermal-no-signal">
+                        Wachten op camera...
+                    </div>
+                </div>
             </div>
 
         </div>
@@ -514,6 +578,7 @@
     <script src="{{ url_for('static', filename='js/coord-log.js') }}"></script>
     <script src="{{ url_for('static', filename='js/drone-controls.js') }}"></script>
     <script src="{{ url_for('static', filename='js/signal-display.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/thermal-display.js') }}"></script>
     <script src="{{ url_for('static', filename='js/socket-handlers.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modals.js') }}"></script>
     <script src="{{ url_for('static', filename='js/tile-cache.js') }}"></script>

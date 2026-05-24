@@ -54,10 +54,22 @@ function registerCoreSocketHandlers() {
         // In een volgende commit komt dit terug als status in de navbar.
         console.warn('[socket] Pi connection lost');
     });
-    // ============================================
+
+
+ // ============================================
     // STATUS_UPDATE — dispatcher
     // ============================================
     window.socket.on('status_update', dispatchStatusUpdate);
+
+ // ============================================
+    // THERMAL_FRAME — apart event om payload klein te houden
+    // ============================================
+    window.socket.on('thermal_frame', window.handleThermalFrame);
+
+    // ============================================
+    // THERMAL_BASELINE_RESULT — feedback na set/clear actie
+    // ============================================
+    window.socket.on('thermal_baseline_result', window.handleThermalBaselineResult);
 }
 
 /**

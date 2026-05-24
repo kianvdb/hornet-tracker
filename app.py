@@ -64,6 +64,12 @@ MAVLINK_BAUD = 57600
 # --- WiFi hotspot ---
 WIFI_HOTSPOT_IFACE = 'wlan1'
 
+# --- Thermal camera (Pimoroni MLX90640 op I2C) ---
+# Refresh rate: 16 Hz = effectief ~8 FPS na I2C-overhead.
+# Bij issues (skipped frames, "Too many retries"): verlaag naar 8 of 4.
+THERMAL_REFRESH_HZ = 8
+THERMAL_EMIT_INTERVAL = 0.15  # max ~6-7 emits/sec naar dashboard
+
 # --- Persistente log storage ---
 # JSON-bestand op disk i.p.v. browser-localStorage zodat log overleeft
 # browser-refresh, andere browsers, andere devices, en Pi-reboots.
@@ -121,13 +127,30 @@ status = {
     'telem_noise_local': 0, 'telem_noise_remote': 0,
     'telem_quality': 0, 'telem_txbuf': 0,
 
-    # LoRa-specifieke velden (stub voor toekomst)
+# LoRa-specifieke velden (stub voor toekomst)
     'lora_packet_count': 0,
     'lora_last_tracker_id': 0,
     'lora_last_seen_sec': -1,
     'lora_snr': 0,
+
+    # Thermal camera status (frame-data wordt apart via 'thermal_frame' emit gestuurd
+    # om de status_update payload klein te houden)
+'thermal_connected': False,
+    'thermal_min': 0.0,
+    'thermal_max': 0.0,
+    'thermal_avg': 0.0,
+    'thermal_fps': 0.0,
+    # Baseline detectie-modus: operator drukt op "baseline instellen" knop
+    # in dashboard om het huidige frame als referentie op te slaan. Daarna
+    # kan de frontend kiezen om alleen pixels te tonen die boven baseline liggen.
+    'thermal_baseline_set': False,
 }
 
+
+# Baseline frame buiten status dict — 768 floats hoort niet in status_update payload.
+# Wordt meegestuurd in thermal_frame events zodra ingesteld.
+thermal_baseline = None  # None of list[768] floats
+_last_thermal_frame = None  # laatst gelezen frame, voor baseline-capture
 baseline_reset_requested = False
 
 # Globale MAVLink connectie - gezet door mavlink_loop() na succesvolle connect.
@@ -713,6 +736,140 @@ def mavlink_loop():
             status['telem_connected'] = False
             time.sleep(5)
 
+# ============================================
+# THERMAL CAMERA LOOP (Pimoroni MLX90640)
+# ============================================
+#
+# Achtergrondthread die continu thermische frames leest via I2C en
+# ze als Socket.io 'thermal_frame' event naar het dashboard pusht.
+#
+# Frame-formaat: 32x24 = 768 floats in °C. Wordt verstuurd als platte
+# lijst; frontend reconstrueert 32-kolom layout met index = h*32 + w.
+#
+# Skip-frames zijn normaal bij hogere refresh rates — de MLX90640
+# stuurt elk frame in twee subframes en bij timing-issues moet de
+# library hertest. We loggen ze maar laten de loop doorgaan.
+
+def thermal_loop():
+    global status
+
+    try:
+        import board
+        import busio
+        import adafruit_mlx90640
+    except ImportError as e:
+        print(f"!! MLX90640 libraries niet beschikbaar: {e}")
+        print("!! Installeer: pip3 install adafruit-circuitpython-mlx90640 --break-system-packages")
+        return
+
+    # Refresh-rate enum mapping
+    refresh_rates = {
+        2: adafruit_mlx90640.RefreshRate.REFRESH_2_HZ,
+        4: adafruit_mlx90640.RefreshRate.REFRESH_4_HZ,
+        8: adafruit_mlx90640.RefreshRate.REFRESH_8_HZ,
+        16: adafruit_mlx90640.RefreshRate.REFRESH_16_HZ,
+        32: adafruit_mlx90640.RefreshRate.REFRESH_32_HZ,
+    }
+    refresh_enum = refresh_rates.get(THERMAL_REFRESH_HZ,
+                                      adafruit_mlx90640.RefreshRate.REFRESH_8_HZ)
+
+    # Verbinding opzetten — retry-loop zodat een tijdelijke I2C-glitch
+    # niet de hele thread doodt
+    mlx = None
+    while mlx is None:
+        try:
+            print("Thermal camera openen...")
+            i2c = busio.I2C(board.SCL, board.SDA, frequency=800000)
+            mlx = adafruit_mlx90640.MLX90640(i2c)
+            mlx.refresh_rate = refresh_enum
+            print(f"Thermal camera OK: serial {[hex(i) for i in mlx.serial_number]}, "
+                  f"refresh {THERMAL_REFRESH_HZ} Hz")
+            status['thermal_connected'] = True
+        except (ValueError, OSError) as e:
+            print(f"Thermal camera fout: {e}. Retry over 5s...")
+            time.sleep(5)
+
+    # Frame buffer wordt door getFrame in-place gevuld
+    frame = [0.0] * 768
+    last_emit = 0.0
+    fail_count = 0
+
+    # Voor FPS-meting: rolling window van frame timestamps
+    frame_times = []
+
+    while True:
+        try:
+            mlx.getFrame(frame)
+            fail_count = 0  # reset bij succes
+            
+            # Bewaar laatste frame voor baseline-capture handler.
+            # Module-scope zodat de Socket.io handlers erbij kunnen.
+            global _last_thermal_frame
+            _last_thermal_frame = list(frame)
+
+            now = time.time()
+            frame_times.append(now)
+            # Houd alleen laatste 2 seconden voor FPS-berekening
+            frame_times = [t for t in frame_times if now - t < 2.0]
+            fps = len(frame_times) / 2.0 if len(frame_times) > 1 else 0.0
+
+            # Rate-limit emits: ook al kan camera 8 FPS, browser hoeft
+            # niet zo vaak te updaten. THERMAL_EMIT_INTERVAL bepaalt cadence.
+            if now - last_emit >= THERMAL_EMIT_INTERVAL:
+                last_emit = now
+
+                # Statistieken berekenen (single-pass voor performance)
+                mn = mx = frame[0]
+                total = 0.0
+                for v in frame:
+                    if v < mn: mn = v
+                    if v > mx: mx = v
+                    total += v
+                avg = total / 768
+
+                status['thermal_min'] = round(mn, 1)
+                status['thermal_max'] = round(mx, 1)
+                status['thermal_avg'] = round(avg, 1)
+                status['thermal_fps'] = round(fps, 1)
+
+                # Emit frame als aparte event om status_update klein te houden.
+                # Frame is een lijst van 768 floats met 1 decimaal afgerond
+                # zodat JSON-grootte ~5 KB blijft i.p.v. ~15 KB.
+                #
+                # Baseline wordt meegestuurd in elke emit zodat de frontend altijd
+                # weet of detectie-modus mogelijk is. None als nog niet ingesteld.
+                socketio.emit('thermal_frame', {
+                    'data': [round(v, 1) for v in frame],
+                    'min': status['thermal_min'],
+                    'max': status['thermal_max'],
+                    'avg': status['thermal_avg'],
+                    'fps': status['thermal_fps'],
+                    'baseline': thermal_baseline,
+                })
+
+        except (ValueError, RuntimeError) as e:
+            # "Too many retries" of "Frame data error" — normaal bij snelle
+            # refresh-rates. Tel ze maar paniekeer niet.
+            fail_count += 1
+            if fail_count > 50:
+                print(f"!! Veel skipped frames ({fail_count}), camera mogelijk losgeraakt")
+                status['thermal_connected'] = False
+                # Probeer opnieuw te verbinden
+                fail_count = 0
+                mlx = None
+                while mlx is None:
+                    try:
+                        time.sleep(2)
+                        i2c = busio.I2C(board.SCL, board.SDA, frequency=800000)
+                        mlx = adafruit_mlx90640.MLX90640(i2c)
+                        mlx.refresh_rate = refresh_enum
+                        print("Thermal camera heropend")
+                        status['thermal_connected'] = True
+                    except (ValueError, OSError) as e2:
+                        print(f"Heropenen mislukt: {e2}")
+        except Exception as e:
+            print(f"Thermal loop unexpected error: {e}")
+            time.sleep(1)
 
 # ============================================
 # ROUTES / EVENTS
@@ -1181,6 +1338,45 @@ def handle_reset_baseline():
     print('Baseline reset aangevraagd')
     baseline_reset_requested = True
 
+    # ============================================
+# THERMAL BASELINE HANDLERS (detectie-modus)
+# ============================================
+
+@socketio.on('thermal_baseline_set')
+def handle_thermal_baseline_set():
+    """
+    Operator drukt op 'baseline instellen'. We slaan een snapshot op van het
+    laatste frame dat thermal_loop heeft gelezen. Frontend gebruikt die
+    snapshot daarna om verschil-rendering te doen (alleen pixels boven baseline).
+    """
+    global thermal_baseline
+    if _last_thermal_frame is None:
+        socketio.emit('thermal_baseline_result', {
+            'success': False,
+            'message': 'Geen thermisch beeld beschikbaar'
+        })
+        return
+    thermal_baseline = list(_last_thermal_frame)
+    status['thermal_baseline_set'] = True
+    print(f"Thermal baseline ingesteld op {len(thermal_baseline)} pixels")
+    socketio.emit('thermal_baseline_result', {
+        'success': True,
+        'message': 'Baseline ingesteld'
+    })
+
+
+@socketio.on('thermal_baseline_clear')
+def handle_thermal_baseline_clear():
+    """Wis baseline — frontend gaat terug naar normale rendering."""
+    global thermal_baseline
+    thermal_baseline = None
+    status['thermal_baseline_set'] = False
+    print("Thermal baseline gewist")
+    socketio.emit('thermal_baseline_result', {
+        'success': True,
+        'message': 'Baseline gewist'
+    })
+
 # ============================================
 # DRONE COMMAND HANDLERS (frontend → Pixhawk)
 # ============================================
@@ -1353,6 +1549,7 @@ if __name__ == '__main__':
     threading.Thread(target=signal_loop, daemon=True).start()
     threading.Thread(target=wifi_loop, daemon=True).start()
     threading.Thread(target=mavlink_loop, daemon=True).start()
+    threading.Thread(target=thermal_loop, daemon=True).start()
 
     print("Dashboard: http://192.168.1.6:5000")
     print("          http://192.168.4.1:5000")
