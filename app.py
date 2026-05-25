@@ -38,7 +38,7 @@ import numpy as np
 # --- Bron selectie (FUTURE-PROOF) ---
 # 'rtlsdr' = huidige RTL-SDR detectie (energy detection)
 # 'lora'   = Ra-01 SPI ontvanger (packet decoding) -- nog te implementeren
-SIGNAL_SOURCE = 'rtlsdr'
+SIGNAL_SOURCE = 'lora'
 
 # --- RTL-SDR parameters ---
 CENTER_FREQ = 433.0e6        # Beacon frequentie (Hz)
@@ -484,78 +484,307 @@ class RtlSdrSource(SignalSource):
 
 
 # ============================================
-# LORA SIGNAL SOURCE (stub - later implementeren)
+# LORA SIGNAL SOURCE (Ra-01 / SX1278 via SPI)
 # ============================================
 class LoRaSource(SignalSource):
     """
-    Stub voor Ra-01 SPI ontvanger.
+    Echte Ra-01 / SX1278 LoRa ontvanger via SPI.
 
-    Implementatie later (wanneer Ra-01 gesoldeerd en aangesloten):
-      pip install pyLoRa-spi   (of spidev + eigen driver)
+    Achtergrond-thread leest packets via polling van het IRQ-register
+    (interrupt-callback werkt niet betrouwbaar met rpi-lgpio op Pi OS
+    Bookworm). Bij elk ontvangen 'HT,<id>,<count>' packet bewaren we
+    RSSI/SNR en metadata in instance-variabelen.
 
-      def open(self):
-          from pyLoRa_spi import LoRa
-          self.lora = LoRa(spi_bus=0, spi_cs=0, pin_reset=24, pin_dio0=25)
-          self.lora.set_frequency(433.0)
-          self.lora.set_spreading_factor(9)       # MATCH beacon.ino
-          self.lora.set_bandwidth(125e3)
-          self.lora.set_coding_rate(5)
-          self.lora.set_crc(True)
-          self.lora.set_sync_word(0x12)
-          self.lora.receive()
+    measure_once() returns:
+      - laatst-gehoorde RSSI als binnen 3s een packet ontvangen werd
+      - -120.0 (floor) anders, zodat 'geen signaal' duidelijk zichtbaar is
+        in de signal-bar (ver onder baseline) zonder dat we de bestaande
+        signal-display logica hoeven aanpassen.
 
-      def measure_once(self):
-          packet = self.lora.read_packet(timeout=0.4)
-          if packet is None:
-              return None                # geen packet = "geen signaal"
-          # packet format: "HT,<id>,<count>,<padding>"
-          parts = packet.decode().split(',')
-          if parts[0] != 'HT':
-              return None
-          status['lora_packet_count'] += 1
-          status['lora_last_tracker_id'] = int(parts[1])
-          status['lora_last_seen_sec'] = 0
-          status['lora_snr'] = self.lora.last_snr
-          return self.lora.last_rssi    # echte dBm!
+    Update status dict velden:
+      - lora_packet_count       totaal aantal succesvol ontvangen packets
+      - lora_last_tracker_id    ID uit laatste packet
+      - lora_last_seen_sec      seconden sinds laatste packet (-1 = nooit)
+      - lora_snr                SNR van laatste packet in dB (echte waarde)
     """
+
+    POLL_INTERVAL = 0.05    # 50 ms — fijn genoeg voor 1 Hz beacon
+    SILENCE_FLOOR = -120.0  # dBm — value bij stilte >3s
+    SILENCE_TIMEOUT = 3.0   # sec zonder packet -> floor
+
+    def __init__(self):
+        self._lora = None
+        self._board = None
+        self._rx_thread = None
+        self._stop = threading.Event()
+
+        # Latest packet state — alleen update bij ontvangst, dus thread-safe
+        # om uit te lezen (atomic float/int writes in Python).
+        self._last_rssi = self.SILENCE_FLOOR
+        self._last_snr = 0.0
+        self._last_seen = 0.0  # time.time() bij laatste packet, 0 = nooit
+        self._tracker_id = 0
+        self._packet_count = 0
+
     def open(self):
-        print("!! LoRaSource nog niet geimplementeerd. Wacht op Ra-01 hardware.")
-        print("!! Val terug op RTL-SDR.")
-        raise NotImplementedError("LoRaSource requires Ra-01 SPI receiver")
+        """Init Ra-01, start RX-thread."""
+        try:
+            from SX127x.LoRa import LoRa, MODE
+            from SX127x.board_config import BOARD
+        except ImportError as e:
+            raise RuntimeError(f"pyLoRa niet beschikbaar: {e}")
+
+        print("LoRa Ra-01 openen...")
+        BOARD.setup()
+        self._board = BOARD
+
+        class _Lora(LoRa):
+            def __init__(self):
+                super().__init__(verbose=False)
+
+        lora = _Lora()
+        lora.set_mode(MODE.SLEEP)
+        lora.set_dio_mapping([0] * 6)
+
+        # Match beacon config exact (zie beacon.ino):
+        # 433 MHz, BW 125 kHz, SF 7, CR 4/5, CRC on, sync word default
+        lora.set_freq(433.0)
+        lora.set_bw(7)            # BW index 7 = 125 kHz
+        lora.set_spreading_factor(7)
+        lora.set_coding_rate(1)   # 1 = 4/5
+        lora.set_rx_crc(True)
+        lora.set_pa_config(pa_select=1)
+        lora.set_lna_gain(1)      # G1 = max LNA gain (1=max, 6=min)
+        lora.set_implicit_header_mode(False)
+
+        # Start continuous RX
+        lora.reset_ptr_rx()
+        lora.set_mode(MODE.RXCONT)
+        self._lora = lora
+
+        # Verify chip — RegVersion moet 0x12 zijn
+        version = lora.get_version()
+        if version != 0x12:
+            raise RuntimeError(
+                f"SX1278 RegVersion = 0x{version:02x}, verwacht 0x12. "
+                f"Check bedrading (NSS/MISO/MOSI/SCK/RST/DIO0)."
+            )
+        print(f"LoRa Ra-01 OK: RegVersion=0x{version:02x}, "
+              f"433.0 MHz, BW 125 kHz, SF 7")
+
+        # Start RX-thread
+        self._stop.clear()
+        self._rx_thread = threading.Thread(
+            target=self._rx_loop, daemon=True, name='lora-rx'
+        )
+        self._rx_thread.start()
+
+    def _rx_loop(self):
+        """
+        Polling-loop op IRQ-register. Voor elke RxDone: decode payload,
+        update _last_rssi / _last_snr / _tracker_id / _packet_count.
+        """
+        global status
+        from SX127x.LoRa import MODE
+
+        while not self._stop.is_set():
+            time.sleep(self.POLL_INTERVAL)
+            try:
+                flags = self._lora.get_irq_flags()
+            except Exception as e:
+                print(f"!! LoRa IRQ read fout: {e}")
+                continue
+
+            if not flags.get('rx_done', 0):
+                continue
+
+            # Packet ontvangen
+            try:
+                crc_error = flags.get('crc_error', 0)
+                payload_raw = self._lora.read_payload(nocheck=True)
+                rssi = self._lora.get_pkt_rssi_value()
+                snr_raw = self._lora.get_pkt_snr_value()
+
+                # Clear flags + restart RX voor volgende packet
+                # Wis alle relevante IRQ flags na packet-handling
+                self._lora.clear_irq_flags(
+                    RxDone=1,
+                    PayloadCrcError=1,
+                    ValidHeader=1,
+                )
+                self._lora.reset_ptr_rx()
+                self._lora.set_mode(MODE.RXCONT)
+            except Exception as e:
+                print(f"!! LoRa packet read fout: {e}")
+                continue
+
+            if crc_error:
+                # CRC fout — packet onbruikbaar, skip
+                continue
+
+            # Decode ASCII payload "HT,<id>,<count>"
+            try:
+                text = bytes(payload_raw).decode('ascii', errors='strict')
+            except UnicodeDecodeError:
+                continue   # niet-ASCII, niet onze beacon
+
+            parts = text.split(',')
+            if len(parts) != 3 or parts[0] != 'HT':
+                continue   # niet ons protocol
+
+            try:
+                tracker_id = int(parts[1])
+                # tx_count interesseert ons hier niet, maar valideert format
+                int(parts[2])
+            except ValueError:
+                continue
+
+            # Convert SNR: pyLoRa returnt ruwe register byte (signed) — echte
+            # dB = byte / 4. Library doet die deling al in nieuwe versies,
+            # maar in de versie die we hebben (0.3.1) niet altijd — defensief:
+            # als de waarde fysiek onmogelijk hoog is (>20 dB), delen we zelf.
+            snr_db = snr_raw if abs(snr_raw) <= 20 else snr_raw / 4.0
+
+            # Update state — alleen primitieve types, atomic in CPython
+            self._last_rssi = float(rssi)
+            self._last_snr = float(snr_db)
+            self._last_seen = time.time()
+            self._tracker_id = tracker_id
+            self._packet_count += 1
+
+            # Update status dict zodat dashboard de extra info ziet
+            status['lora_packet_count'] = self._packet_count
+            status['lora_last_tracker_id'] = tracker_id
+            status['lora_snr'] = round(snr_db, 1)
+            status['lora_last_seen_sec'] = 0
+
+    def measure_once(self):
+        """
+        Returns laatste RSSI in dBm, of -120 dBm bij stilte >3s.
+
+        NB: bestaande signal_loop roept measure_once() 50x per cycle aan
+        (peak-hold). Voor LoRa heeft dat geen nut omdat we al de echte
+        packet-RSSI hebben — maar het is harmless want we returnen gewoon
+        dezelfde laatste waarde. Signal_loop heeft een speciaal pad voor
+        LoRa zodat we maar 1x per cycle de waarde lezen.
+        """
+        global status
+        now = time.time()
+        if self._last_seen == 0:
+            # Nog nooit een packet ontvangen
+            status['lora_last_seen_sec'] = -1
+            return self.SILENCE_FLOOR
+
+        age = now - self._last_seen
+        status['lora_last_seen_sec'] = round(age, 1)
+
+        if age > self.SILENCE_TIMEOUT:
+            return self.SILENCE_FLOOR
+
+        return self._last_rssi
+
+    def close(self):
+        """Stop RX-thread en cleanup."""
+        self._stop.set()
+        if self._rx_thread and self._rx_thread.is_alive():
+            self._rx_thread.join(timeout=2)
+        if self._lora is not None:
+            try:
+                from SX127x.LoRa import MODE
+                self._lora.set_mode(MODE.SLEEP)
+            except Exception:
+                pass
+            self._lora = None
+        if self._board is not None:
+            try:
+                self._board.teardown()
+            except Exception:
+                pass
+            self._board = None
 
     def describe(self):
-        return "LoRa Ra-01 (stub)"
+        return "LoRa Ra-01 SX1278 @ 433.0 MHz, BW 125 kHz, SF 7"
 
 
 def make_signal_source():
+    """
+    Bouw de SignalSource volgens SIGNAL_SOURCE config.
+
+    Geen fallback meer: als 'lora' faalt willen we de error duidelijk
+    zien (Pi-side log + dashboard 'signaal -120 dBm'), niet stilletjes
+    terugvallen op RTL-SDR. Dat verhult hardware-problemen.
+    """
     if SIGNAL_SOURCE == 'lora':
-        try:
-            src = LoRaSource()
-            src.open()
-            return src
-        except NotImplementedError:
-            pass  # fallback
-    src = RtlSdrSource()
-    src.open()
-    return src
+        src = LoRaSource()
+        src.open()
+        return src
+    if SIGNAL_SOURCE == 'rtlsdr':
+        src = RtlSdrSource()
+        src.open()
+        return src
+    raise ValueError(f"Onbekende SIGNAL_SOURCE: {SIGNAL_SOURCE!r}")
 
 
 # ============================================
 # SIGNAL LOOP (peak-hold + vaste baseline)
 # ============================================
 def signal_loop():
+    """
+    Centrale signal-loop met twee paden:
+      - RTL-SDR: peak-hold + dynamische baseline (oude flow, ongewijzigd)
+      - LoRa:    direct laatste packet-RSSI + packet-age detectie
+
+    Voor LoRa zijn signal_delta/baseline geen betekenisvolle concepten —
+    we hebben echte packet-RSSI in dBm. signal_active is true zolang er
+    binnen 3s een packet binnenkwam.
+    """
     global status, baseline_reset_requested
 
     source = make_signal_source()
     status['signal_source'] = source.describe()
     print(f"Signal source: {source.describe()}")
 
+    # --- LoRa pad: geen baseline meting, direct in loop ---
+    if SIGNAL_SOURCE == 'lora':
+        status['baseline'] = -120.0   # placeholder, niet gebruikt
+        socketio.emit('baseline_status', {
+            'measuring': False, 'baseline': -120.0
+        })
+        print("LoRa modus: baseline-meting overgeslagen "
+              "(LoRa gebruikt packet-based detectie)")
+
+        while True:
+            try:
+                rssi = source.measure_once()
+                last_seen = status.get('lora_last_seen_sec', -1)
+
+                # Detectie: packet binnen 3s = signaal actief
+                active = (last_seen >= 0) and (last_seen < 3.0)
+
+                # Hou signal_power op laatste echte RSSI, ook tijdens
+                # 'stilte' tussen packets. Frontend toont dan een stabiele
+                # waarde in plaats van te flikkeren tussen -94 en -120.
+                if active:
+                    status['signal_power'] = round(rssi, 1)
+                else:
+                    status['signal_power'] = -120.0
+
+                status['signal_delta'] = 0.0      # niet betekenisvol voor LoRa
+                status['signal_detected'] = active
+
+                socketio.emit('status_update', status)
+                time.sleep(MEASURE_INTERVAL)
+
+            except Exception as e:
+                print(f"Signal loop error (LoRa): {e}")
+                time.sleep(1)
+
+    # --- RTL-SDR pad: bestaande peak-hold + baseline flow ---
     def do_baseline():
         print("Baseline meting...")
         socketio.emit('baseline_status', {'measuring': True})
         readings = []
         for i in range(BASELINE_NUM_READINGS):
-            # Gebruik peak-hold ook voor baseline -> consistent
             peaks = []
             for _ in range(PEAK_HOLD_SAMPLES):
                 v = source.measure_once()
@@ -566,7 +795,9 @@ def signal_loop():
                 print(f"  Baseline {i+1}/{BASELINE_NUM_READINGS}: {readings[-1]:.1f} dB")
         baseline = sum(readings) / len(readings) if readings else -100
         print(f"Baseline: {baseline:.1f} dB (vast)")
-        socketio.emit('baseline_status', {'measuring': False, 'baseline': round(baseline, 1)})
+        socketio.emit('baseline_status', {
+            'measuring': False, 'baseline': round(baseline, 1)
+        })
         return baseline
 
     baseline = do_baseline()
@@ -579,7 +810,6 @@ def signal_loop():
                 baseline = do_baseline()
                 status['baseline'] = round(baseline, 1)
 
-            # Peak-hold: verzamel PEAK_HOLD_SAMPLES metingen, neem max
             peaks = []
             for _ in range(PEAK_HOLD_SAMPLES):
                 v = source.measure_once()

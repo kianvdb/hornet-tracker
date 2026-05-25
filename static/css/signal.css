@@ -34,3 +34,156 @@
     font-weight: bold;
     animation: pulse 1s infinite;
 }
+
+/* ============================================
+   LORA SIGNAAL CARD — drie-tier hierarchische layout
+   ============================================
+   TIER 1: RSSI groot + detectie badge + absolute bar
+   TIER 2: SNR + laatste packet (link-kwaliteit metrics)
+   TIER 3: Packets + Tracker ID (administratief)
+*/
+
+/* --- TIER 1 — primaire info --- */
+
+.lora-primary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin: 8px 0 12px 0;
+}
+
+.lora-rssi-block {
+    text-align: left;
+}
+
+.lora-rssi-value {
+    font-size: 2.2em;
+    font-weight: bold;
+    color: #4ade80;
+    font-family: 'Consolas', 'Monaco', monospace;
+    line-height: 1.1;
+}
+
+.lora-rssi-label {
+    font-size: 0.75em;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+}
+
+.lora-detect-badge {
+    padding: 8px 14px;
+    border-radius: 16px;
+    font-size: 0.85em;
+    font-weight: bold;
+    background: #1a1a2e;
+    color: #888;
+    border: 1px solid #2a2a3e;
+    white-space: nowrap;
+    transition: all 0.2s;
+}
+
+.lora-detect-badge.active {
+    background: rgba(74, 222, 128, 0.15);
+    color: #4ade80;
+    border-color: #4ade80;
+    animation: pulse 1.5s infinite;
+}
+
+/* --- TIER 1 — absolute RSSI bar (-120..-40 dBm) --- */
+
+.lora-bar-container {
+    width: 100%;
+    height: 18px;
+    background: #0a1530;
+    border-radius: 9px;
+    overflow: hidden;
+    margin-top: 4px;
+    border: 1px solid #1a2540;
+}
+
+.lora-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg,
+        #ef4444 0%,        /* -120 dBm: rood (geen signaal) */
+        #f87171 15%,
+        #f5a623 35%,       /* -75 dBm: oranje */
+        #fbbf24 55%,
+        #84cc16 75%,
+        #4ade80 100%       /* -40 dBm: helder groen */
+    );
+    border-radius: 9px;
+    transition: width 0.3s ease;
+}
+
+.lora-bar-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7em;
+    color: #666;
+    margin-top: 4px;
+    font-family: 'Consolas', monospace;
+}
+
+/* --- TIER 2 — link-kwaliteit metrics --- */
+
+.lora-tier2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid #1a2540;
+}
+
+.lora-metric {
+    background: #0f3460;
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+
+.lora-metric-label {
+    font-size: 0.7em;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+
+.lora-metric-value {
+    font-size: 1.05em;
+    font-weight: bold;
+    color: #eee;
+    font-family: 'Consolas', monospace;
+}
+
+/* --- TIER 3 — administratief, compact --- */
+
+.lora-tier3 {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: #0a1530;
+    border-radius: 4px;
+    font-size: 0.8em;
+}
+
+.lora-metric-sm {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.lora-metric-sm .lora-metric-label {
+    margin-bottom: 0;
+}
+
+.lora-metric-value-sm {
+    color: #ccc;
+    font-weight: bold;
+    font-family: 'Consolas', monospace;
+}
