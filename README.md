@@ -8,9 +8,9 @@ Technologie.
 De drone — VespaTrack — draagt een RF-ontvanger en patrouilleert door
 een gebied terwijl ze het signaal volgt van een kleine LoRa-beacon die
 op een testobject is geplakt. Het grondstation toont in real-time de
-drone-positie op een satellietkaart, het ontvangen signaal, een
-thermisch beeld voor visuele bevestiging op korte afstand, en biedt
-bediening van de vlucht.
+drone-positie op een satellietkaart, het ontvangen LoRa-signaal met
+RSSI/SNR per packet, een thermisch beeld voor visuele bevestiging op
+korte afstand, en biedt bediening van de vlucht.
 
 ---
 
@@ -25,6 +25,7 @@ bediening van de vlucht.
 - [Netwerktoegang](#netwerktoegang)
 - [Offline veldwerk](#offline-veldwerk)
 - [Thermisch beeld](#thermisch-beeld)
+- [LoRa signaal](#lora-signaal)
 - [Ontwikkelen](#ontwikkelen)
 - [Roadmap](#roadmap)
 - [Licentie](#licentie)
@@ -40,7 +41,7 @@ bediening van de vlucht.
 │  Beacon op  │ ─ ─ ─ ─ ─ ─ ─ ─ ─> │      Drone-payload      │
 │  testobject │                    │  - Pixhawk 6C Mini      │
 └─────────────┘                    │  - Raspberry Pi 4       │
-                                   │  - RTL-SDR / Ra-01      │
+                                   │  - SX1278 Ra-01 (LoRa)  │
                                    │  - MLX90640 (warmtecam) │
                                    └───────────┬─────────────┘
                                                │ WiFi hotspot
@@ -72,8 +73,13 @@ de Pixhawk.
 
 ### RF-tracking
 
-- **SX1278 Ra-01 LoRa-ontvanger** — beacon-signaal ontvangen via SPI
-- **RTL-SDR USB** — tijdelijke vervanger voor Ra-01 tijdens ontwikkeling
+- **SX1278 Ra-01 LoRa-ontvanger** via SPI met Yagi 433 MHz antenne
+  (~10 dBi gain) verbonden via IPEX-SMA pigtail. Decodeert `HT,<id>,<count>`
+  packets van een Arduino Pro Mini beacon (zelfde SX1278 chip) met TX
+  power 5-20 dBm afhankelijk van voeding-bron.
+- Tijdens ontwikkeling is ook een RTL-SDR USB-stick gebruikt voor
+  energy-detection als baseline-systeem (zie SignalSource interface
+  in `app.py`).
 
 ### Sensoren
 
@@ -98,8 +104,14 @@ de Pixhawk.
   threading-based background loops voor signal/wifi/mavlink/thermal
 - **MAVLink** — pymavlink, bidirectioneel: telemetrie ontvangen
   (GPS, batterij, mode, armed) én commando's sturen (arm/disarm/mode)
-- **RF-detectie** — pyrtlsdr met FFT-based energy detection, baseline
-  + peak-hold detectie
+- **LoRa packet decoding** — pyLoRa library (SX127x) via SPI met
+  polling-based RX in een aparte thread. Interrupt-callbacks worden
+  niet ondersteund door `rpi-lgpio` (de drop-in vervanger van `RPi.GPIO`
+  op Pi OS Bookworm), dus we pollen het IRQ-register elke 50 ms — fijn
+  genoeg voor een 1 Hz beacon zonder noemenswaardige CPU-impact.
+- **RF-detectie (legacy/optioneel)** — pyrtlsdr met FFT-based energy
+  detection en peak-hold baseline. Pad blijft beschikbaar via
+  `SIGNAL_SOURCE = 'rtlsdr'` in `app.py`.
 - **Thermische camera** — Adafruit CircuitPython MLX90640 library via
   I2C, frame-stream via aparte Socket.io `thermal_frame` event om de
   status-payload klein te houden
@@ -135,6 +147,16 @@ sudo apt update
 sudo apt install python3-pip git i2c-tools
 pip3 install -r requirements.txt
 pip3 install adafruit-circuitpython-mlx90640 --break-system-packages
+pip3 install pyLoRa --break-system-packages
+```
+
+Op Pi OS Bookworm werkt `RPi.GPIO` niet meer correct met `add_event_detect`
+omdat de onderliggende GPIO-driver van `/dev/gpiomem` naar `/dev/gpiochipN`
+is gemigreerd. Vervang door drop-in compatibele `rpi-lgpio`:
+
+```bash
+pip3 uninstall RPi.GPIO -y --break-system-packages
+pip3 install rpi-lgpio --break-system-packages
 ```
 
 Het bestand `requirements.txt` ligt in de root van het project en bevat:
@@ -168,7 +190,33 @@ sudo i2cdetect -y 1
 # Verwacht: '33' in het 16x16 raster
 ```
 
-### 4. Systemd service registreren
+### 4. SPI activeren voor LoRa-ontvanger
+
+SPI is op de Pi standaard uitgeschakeld. Activeren in `/boot/firmware/config.txt`:
+
+```bash
+sudo nano /boot/firmware/config.txt
+# Zoek/voeg toe:
+dtparam=spi=on
+
+sudo reboot
+```
+
+Verifieer dat de SPI-devices verschijnen:
+
+```bash
+ls /dev/spidev*
+# Verwacht: /dev/spidev0.0 en /dev/spidev0.1
+```
+
+Daarna kan de Ra-01 ontvanger getest worden met de smoke test:
+
+```bash
+python3 /tmp/lora_chipid.py
+# Verwacht: RegVersion = 0x12, Chip detected: SX1276/77/78/79
+```
+
+### 5. Systemd service registreren
 
 `systemd` is het service-management systeem van Linux dat ervoor zorgt
 dat het dashboard automatisch start bij boot en herstart na een crash.
@@ -202,7 +250,7 @@ sudo systemctl start hornet-tracker
 
 Vanaf nu start het dashboard automatisch bij elke boot van de Pi.
 
-### 5. Udev-rule voor Pixhawk
+### 6. Udev-rule voor Pixhawk
 
 Zodat de Pixhawk altijd verschijnt als `/dev/ttyPixhawk` in plaats van
 een wisselende `/dev/ttyUSB0`:
@@ -219,7 +267,7 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-### 6. Comfast hotspot configureren (optioneel, voor veldwerk)
+### 7. Comfast hotspot configureren (optioneel, voor veldwerk)
 
 Voor veldgebruik zonder router maakt de Pi een eigen WiFi-hotspot via
 de Comfast MT7612U USB-adapter op `wlan1`. NetworkManager regelt dit:
@@ -260,9 +308,9 @@ sudo journalctl -u hornet-tracker -f     # live logs volgen
 ```text
 hornet-tracker/
 ├── app.py                          Flask + Socket.io backend, MAVLink,
-│                                   RTL-SDR, WiFi status, command handlers,
-│                                   thermal camera loop, Excel-export endpoint,
-│                                   tile-cache routes
+│                                   RTL-SDR/LoRa SignalSource, WiFi status,
+│                                   command handlers, thermal camera loop,
+│                                   Excel-export endpoint, tile-cache routes
 ├── prefetch_tiles.py               CLI tool: bulk-download tiles voor offline gebruik
 ├── README.md                       dit bestand
 ├── requirements.txt                Python dependencies
@@ -292,7 +340,7 @@ hornet-tracker/
     │   ├── layout.css              2-koloms dashboard layout
     │   ├── navbar.css              vaste navbar bovenaan met status-popovers
     │   ├── cards.css               grid cards + status rows + signaalbalkjes
-    │   ├── signal.css              LoRa signal card
+    │   ├── signal.css              LoRa signal card met 3-tier hierarchie
     │   ├── map.css                 Leaflet kaart + GPS-waiting badge
     │   ├── coord-log.css           gelogde coördinaten + status badges + toast
     │   ├── controls.css            knoppen + modals + log/export/tile-cache modals
@@ -305,7 +353,8 @@ hornet-tracker/
         ├── coord-log.js            log entries, map-click pin, status/notitie,
         │                           edit, delete, REST naar backend, Excel-export
         ├── drone-controls.js       arm/disarm/mode + command result handler
-        ├── signal-display.js       LoRa signal card + baseline reset
+        ├── signal-display.js       LoRa signal card 3-tier rendering: RSSI/badge/bar,
+        │                           SNR + packet-age, packets count + tracker ID
         ├── thermal-display.js      MLX90640 canvas rendering + Iron/Inferno/
         │                           Grayscale/Rainbow paletten + baseline detectie
         ├── navbar.js               popover toggle + click-outside-to-close
@@ -491,6 +540,113 @@ gerond op 1 decimaal, zodat de JSON-payload ~5 KB per frame blijft.
 
 ---
 
+## LoRa signaal
+
+Het dashboard toont in real-time het signaal van de LoRa-beacon op het
+testobject. Anders dan bij energy-detection met RTL-SDR (waar we een
+ruis-baseline meten en kijken hoeveel dB het signaal daarboven uitkomt)
+geeft de Ra-01 ontvanger ons **echte RSSI per gedecodeerd packet** in
+dBm. Dat is een meer betekenisvolle waarde voor link-budget en bereik
+analyse.
+
+### Beacon-protocol
+
+De beacon is een Arduino Pro Mini 3.3V/8MHz met SX1278 Ra-01 module,
+zelfde chip als de ontvanger. Beacon-code in `beacon.ino`:
+
+- **Frequentie**: 433 MHz
+- **Bandwidth**: 125 kHz
+- **Spreading factor**: 7 (snelle modulation, korte time-on-air)
+- **Coding rate**: 4/5
+- **CRC**: aan
+- **Sync word**: default 0x12
+
+Beacon stuurt elke seconde een ASCII-payload `HT,<id>,<count>`:
+
+- `HT` — protocol-identifier (Hornet Tracker)
+- `<id>` — tracker-ID, voorzien voor multi-tracker uitbreiding
+- `<count>` — TX-counter sinds beacon-power-on
+
+TX-power **5 dBm** voor USB-TTL testing (CH340 regulator levert
+~50 mA, SX1278 piek tijdens TX is 120 mA — brownout-reset zonder
+verlaging). Voor veldwerk met LiPo-batterij op RAW/GND wordt
+TX-power naar **20 dBm** gezet.
+
+### Dashboard layout
+
+Drie-tier hiërarchie in de signal-card:
+
+**Tier 1 — primaire info**:
+- Grote RSSI-waarde in dBm (groen, monospace)
+- Detectie-badge: "● Signaal" (groen, pulse) of "Geen signaal" (grijs)
+- Absolute RSSI-bar met gradient rood (-120) → oranje (-80) → groen (-40)
+
+**Tier 2 — link-kwaliteit metrics**:
+- **SNR** (Signal-to-Noise Ratio) in dB. LoRa kan tot -20 dB SNR
+  decoderen (signaal 100× zwakker dan ruis) wat normaal onmogelijk
+  is voor andere modulatie-schema's. Positieve SNR betekent gezonde
+  link, negatieve SNR betekent marginaal — packets kunnen verloren
+  gaan. Operator gebruikt dit als vroege waarschuwing voor verlies.
+- **Laatste packet**: tijd sinds laatste succesvol ontvangen packet.
+  Bij stilte > 3 seconden zakt RSSI naar de silence-floor van
+  -120 dBm; teller blijft oplopen tot er weer een packet binnenkomt.
+
+**Tier 3 — administratief**:
+- **Packets**: totale teller sinds service-start. Reset bij Pi-reboot
+  of service-restart, telt door over operator-acties zoals
+  page-refresh of beacon-uit-en-aan.
+- **Tracker ID**: het ID uit de laatste packet. Toont "ID --" tot
+  eerste packet binnenkomt. Voorzien voor multi-tracker uitbreiding
+  (zie [Roadmap](#roadmap)).
+
+### Detectie-criterium
+
+`signal_detected = packet binnen 3 seconden ontvangen`. Anders dan bij
+RTL-SDR is er geen baseline-threshold meer — packet-decodering is
+binary (CRC OK of niet), dus "signaal aanwezig" is letterlijk "we
+hebben recent een geldig packet gekregen".
+
+Bij verlies van signaal:
+- 0–3 sec sinds laatste packet: badge blijft groen, RSSI blijft op
+  laatste waarde
+- > 3 sec: badge wordt grijs, RSSI zakt naar -120 dBm, bar leegt
+- SNR + Tracker ID blijven op laatste waarde staan (info uit laatste
+  packet, geen reden om te wissen)
+
+### Architectuur op de Pi
+
+`SignalSource` is een abstracte interface in `app.py` met twee
+implementaties:
+
+- **`RtlSdrSource`** — energy-detection via FFT op RTL-SDR samples
+  met peak-hold over 400 ms en dynamische baseline
+- **`LoRaSource`** — packet-decoding via pyLoRa op SPI
+
+`SIGNAL_SOURCE = 'lora'` in de config bovenaan `app.py` activeert
+LoRa-mode. De `signal_loop` heeft een apart pad voor LoRa zonder
+peak-hold of baseline-meting; bij RTL-SDR-mode blijft de bestaande
+flow ongewijzigd. Voor onboard demo's of fallback testing kan
+gewisseld worden zonder andere code aan te raken.
+
+**Polling in plaats van interrupts**: pyLoRa probeert standaard
+DIO0-interrupts te gebruiken voor RxDone events, maar `add_event_detect`
+in `rpi-lgpio` (de drop-in vervanger van `RPi.GPIO` op Pi OS Bookworm)
+werkt niet betrouwbaar voor SPI-IRQ patronen. Daarom polleert
+`LoRaSource._rx_loop` elke 50 ms het `RegIrqFlags` register direct.
+Bij 1 Hz beacon-rate is dat ruim genoeg en kost geen merkbare CPU-tijd.
+
+### Hardware-quirk: bedrading-stabiliteit
+
+De Ra-01 module heeft tijdens dit project drie keer een soldeer/contact
+issue opgeleverd waarbij `RegVersion` als `0x00` werd gelezen (MISO
+niet aangesloten gedrag) in plaats van de verwachte `0x12`. Telkens
+gefixt door DuPont-kabels visueel te inspecteren en aan te drukken op
+beide aansluitingen (Pi GPIO header én Ra-01 pads). Voor veldwerk zou
+de module hersolderd of mechanisch gestabiliseerd moeten worden om dit
+tijdens een missie te vermijden.
+
+---
+
 ## Ontwikkelen
 
 ### Git branch-strategie
@@ -530,11 +686,9 @@ feature inzoomen op de chronologie van een onderdeel.
 - `feature/thermal-camera` — Pimoroni MLX90640 via I2C, Socket.io
   frame-stream, canvas-rendering met vier paletten, normaal + baseline
   detectie-modus
-
-**Lopende (wacht op hardware):**
-
-- `feature/lora-packet-decoding` — Ra-01 SX1278 in productie zetten ter
-  vervanging van RTL-SDR energy detection
+- `feature/lora-packet-decoding` — SX1278 Ra-01 ontvanger via SPI met
+  pyLoRa, polling-based RX, decodering van `HT,<id>,<count>` beacon-
+  protocol, 3-tier dashboard layout met RSSI/SNR/packet-age
 
 ### Commit messages
 
@@ -575,6 +729,7 @@ incrementele stap zonder dependencies te hoeven introduceren.
 
 - Real-time MAVLink telemetrie (GPS, batterij, hoogte, mode, armed)
 - RTL-SDR signal detection met automatische baseline + peak-hold
+  (als legacy/fallback pad behouden in SignalSource interface)
 - Leaflet kaart (lokaal gehost) met satelliet/stratenplan en drone-tracking
 - Pi shutdown/reboot via dashboard
 - Modulaire CSS + JS structuur
@@ -621,14 +776,30 @@ incrementele stap zonder dependencies te hoeven introduceren.
   - Baseline detectie-modus: snapshot huidige scène, daarna alleen
     afwijkingen tonen — geschikt voor hot-spot zoektocht
   - Min/Gem/Max/FPS statistieken altijd zichtbaar
+- LoRa packet-decoding ter vervanging van RTL-SDR energy detection:
+  - SX1278 Ra-01 ontvanger via SPI met pyLoRa library
+  - Polling-based RX in achtergrond-thread (interrupt-callbacks werken
+    niet betrouwbaar met rpi-lgpio op Pi OS Bookworm)
+  - Decoderen van `HT,<id>,<count>` beacon-protocol met CRC-check
+  - Echte RSSI per packet in dBm + SNR (Signal-to-Noise Ratio in dB)
+  - Drie-tier dashboard layout: RSSI + detectie-badge + absolute bar,
+    SNR + packet-age, packets count + tracker ID
+  - Detectie op basis van packet-age (< 3 s = signaal actief),
+    silence-floor op -120 dBm bij stilte
+  - SignalSource interface met RTL-SDR fallback voor backup/testing
+  - Bestaande dashboard-flow (signal-card layout, status_update events)
+    behouden — `SIGNAL_SOURCE` config switch tussen modi
 
 ### In planning
 
-- Ra-01 LoRa-pakketdecodering ter vervanging van RTL-SDR energy detection
-- Layout-finetuning na LoRa-integratie zodat alle cards exact passen
-  op 1920 × 1080 zonder scrollen
+- Layout-finetuning zodat alle cards exact passen op 1920 × 1080
+  zonder scrollen, nu alle hardware-componenten geïntegreerd zijn
 - Besturing card collapse-toggle (mode-knoppen verbergen tijdens vlucht
   om ruimte vrij te maken voor kaart en warmtebeeld)
+- Ra-01 module hersolderen of mechanisch stabiliseren om tijdens
+  veldwerk geen contact-issues te krijgen
+- Range-test in vrij veld met TX-power 20 dBm op LiPo om realistische
+  bereik-cijfers te krijgen voor het thesis-rapport
 
 ### Toekomstige uitbreidingen (visie, niet gepland)
 
@@ -638,6 +809,11 @@ incrementele stap zonder dependencies te hoeven introduceren.
   (waargenomen → bestreden). Vereist authenticatie, certificaat-upload,
   GDPR-compliance. Wordt eerst uitgewerkt als ontwerpvisie in het
   thesis-rapport.
+- Multi-tracker uitbreiding: meerdere beacons gelijktijdig in de lucht
+  met verschillende ID's in de payload. Vereist coördinatie tussen
+  beacons (TDMA, of verschillende frequenties/SF's per tracker) om
+  co-channel collisions te vermijden. Backend en frontend zijn al
+  voorbereid via het tracker-ID veld.
 - Auto-discovery van nestlocatie op basis van signaal-piek + GPS-positie
   correlatie
 - Computer-vision op het thermische beeld voor automatische

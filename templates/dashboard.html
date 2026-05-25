@@ -156,24 +156,50 @@
 
             <div class="card">
                 <h2>📻 LoRa Signaal (433 MHz)</h2>
-                <div class="big-number" id="signal-delta">+0.0 dB</div>
-                <div class="signal-bar-container">
-                    <div class="signal-bar" id="signal-bar" style="width: 0%"></div>
+
+                <!-- TIER 1: primaire info — RSSI + detectie badge -->
+                <div class="lora-primary">
+                    <div class="lora-rssi-block">
+                        <div class="lora-rssi-value" id="lora-rssi">-- dBm</div>
+                        <div class="lora-rssi-label">Signaalsterkte</div>
+                    </div>
+                    <div class="lora-detect-badge" id="lora-detect-badge">
+                        Geen signaal
+                    </div>
                 </div>
-                <div class="status-row">
-                    <span class="status-label">Power</span>
-                    <span class="status-value" id="signal-power">-- dB</span>
+
+                <!-- TIER 1: visuele bar — absolute schaal -120..-40 dBm -->
+                <div class="lora-bar-container">
+                    <div class="lora-bar-fill" id="lora-bar-fill" style="width: 0%"></div>
                 </div>
-                <div class="status-row">
-                    <span class="status-label">Baseline</span>
-                    <span>
-                        <span class="status-value" id="signal-baseline">-- dB</span>
-                        <button class="btn btn-small" id="reset-baseline-btn" onclick="resetBaseline()">Reset</button>
-                    </span>
+                <div class="lora-bar-scale">
+                    <span>-120 dBm</span>
+                    <span>-80</span>
+                    <span>-40 dBm</span>
                 </div>
-                <div class="status-row">
-                    <span class="status-label">Detectie</span>
-                    <span class="status-value" id="signal-detected">--</span>
+
+                <!-- TIER 2: link-kwaliteit metrics -->
+                <div class="lora-tier2">
+                    <div class="lora-metric">
+                        <div class="lora-metric-label">SNR</div>
+                        <div class="lora-metric-value" id="lora-snr">-- dB</div>
+                    </div>
+                    <div class="lora-metric">
+                        <div class="lora-metric-label">Laatste packet</div>
+                        <div class="lora-metric-value" id="lora-last-seen">--</div>
+                    </div>
+                </div>
+
+                <!-- TIER 3: administratieve info -->
+                <div class="lora-tier3">
+                    <div class="lora-metric-sm">
+                        <span class="lora-metric-label">Packets</span>
+                        <span class="lora-metric-value-sm" id="lora-packet-count">0</span>
+                    </div>
+                    <div class="lora-metric-sm">
+                        <span class="lora-metric-label">Tracker</span>
+                        <span class="lora-metric-value-sm" id="lora-tracker-id">ID --</span>
+                    </div>
                 </div>
             </div>
 
