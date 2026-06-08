@@ -789,6 +789,14 @@ incrementele stap zonder dependencies te hoeven introduceren.
   - SignalSource interface met RTL-SDR fallback voor backup/testing
   - Bestaande dashboard-flow (signal-card layout, status_update events)
     behouden — `SIGNAL_SOURCE` config switch tussen modi
+- Drone-marker als georiënteerde pijl in plaats van emoji:
+  - SVG paper-airplane vorm met oranje fill en witte rand
+  - Roteert op MAVLink GLOBAL_POSITION_INT.hdg (magnetometer-heading)
+  - Smooth rotatie via CSS transition (0.3s) zodat marker draait i.p.v.
+    abrupt springt bij richting-verandering
+  - Werkt los van GPS-fix: heading is direct beschikbaar zodra
+    magnetometer-data binnenkomt
+- VespaTrack logo in navbar ter vervanging van emoji + tekst    
 
 ### In planning
 

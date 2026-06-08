@@ -38,12 +38,18 @@ body.has-navbar {
    ============================================ */
 
 /* App titel links */
+/* App titel links — bevat het VespaTrack logo */
 .navbar-title {
-    color: #f5a623;
-    font-size: 1.1em;
-    font-weight: bold;
-    margin-right: 24px;
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+
+    flex-shrink: 0;
+}
+
+.navbar-logo {
+    height: 25px;          /* past binnen 56px navbar met marge */
+    width: auto;
+    display: block;
 }
 
 /* Container voor status-indicatoren (vult ruimte tussen titel en knoppen) */
