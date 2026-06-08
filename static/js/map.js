@@ -245,6 +245,59 @@ function hasFix() {
     return hasGpsFix;
 }
 
+
+// ============================================
+// ADRES-ZOEK IN MAP CARD HEADER
+// ============================================
+//
+// Operator kan een adres opzoeken om snel naar een gemelde locatie te
+// navigeren zonder visueel zoeken op de kaart. GEEN automatische pin:
+// kaart centreert + zoomt in op het adres, operator klikt vervolgens
+// zelf op de echte nest-positie (kan een paar huizen verder zijn dan
+// het gemelde adres — bv. "in de weide drie huizen verder").
+//
+// Zoom-niveau bij selectie is iets uitgezoomder dan FIX_ZOOM (18) zodat
+// operator ook de omgeving ziet. Bij FIX_ZOOM toon je vaak maar één
+// gebouw — te krap om visueel context te krijgen.
+
+const ADDRESS_SEARCH_ZOOM = 17;
+
+/**
+ * Init het adres-zoek-veld in de map card header. Wordt aangeroepen
+ * vanuit main.js na DOMContentLoaded, gebruikt setupAddressAutocomplete
+ * uit nominatim.js voor de gedeelde search-flow.
+ */
+function initMapAddressSearch() {
+    const inputEl = document.getElementById('map-address-input');
+    const sugEl   = document.getElementById('map-address-suggestions');
+    if (!inputEl || !sugEl) {
+        console.warn('[map] adres-zoek elementen niet gevonden');
+        return;
+    }
+    if (typeof window.setupAddressAutocomplete !== 'function') {
+        console.warn('[map] nominatim.js niet geladen, adres-zoek uitgeschakeld');
+        return;
+    }
+
+    window.setupAddressAutocomplete({
+        inputEl: inputEl,
+        suggestionEl: sugEl,
+        onSelect: function(lat, lon, name) {
+            // Centreer + zoom in, GEEN pin plaatsen — operator klikt
+            // zelf op de exacte locatie van het nest
+            map.setView([lat, lon], ADDRESS_SEARCH_ZOOM);
+
+            // Korte toast als feedback
+            if (window.showToast) {
+                window.showToast('📍 ' + name);
+            }
+
+            // Leeg input zodat operator gemakkelijk nieuwe zoekopdracht doet
+            inputEl.value = '';
+        }
+    });
+}
+
 // Expose op window
 window.initMap         = initMap;
 window.updateMap       = updateMap;
@@ -252,3 +305,4 @@ window.centerMap       = centerMap;
 window.toggleTrail     = toggleTrail;
 window.getCurrentMap   = getCurrentMap;
 window.hasFix          = hasFix;
+window.initMapAddressSearch = initMapAddressSearch;

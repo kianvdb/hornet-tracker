@@ -110,3 +110,74 @@
     background: transparent;
     border: none;
 }
+
+
+/* ============================================
+   MAP CARD HEADER — title + adres-zoek balk
+   ============================================
+   Operator kan een adres opzoeken om kaart te centreren zonder visueel
+   te moeten zoeken. GEEN automatische pin: kaart centreert + zoomt in,
+   operator klikt zelf op de echte nest-positie (kan paar huizen verder
+   liggen dan het gemelde adres).
+*/
+
+.map-card-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 12px;
+}
+
+.map-card-header h2 {
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.map-address-search {
+    position: relative;
+    flex: 1;
+    max-width: 320px;
+    margin-left: auto;
+}
+
+.map-address-search input {
+    width: 100%;
+    padding: 7px 10px;
+    background: #0a1530;
+    border: 1px solid #2a3550;
+    border-radius: 6px;
+    color: #eee;
+    font-size: 0.9em;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+.map-address-search input:focus {
+    outline: none;
+    border-color: #f5a623;
+}
+
+.map-address-search input::placeholder {
+    color: #777;
+}
+
+/* Suggestion dropdown positioneert onder de input. Hoge z-index zodat
+   hij over de Leaflet kaart heen valt. */
+.map-address-search .address-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    background: #1a1f3a;
+    border: 1px solid #2a3550;
+    border-radius: 6px;
+    max-height: 280px;
+    overflow-y: auto;
+    z-index: 1000;
+    display: none;
+}
+
+.map-address-search .address-suggestions.show {
+    display: block;
+}

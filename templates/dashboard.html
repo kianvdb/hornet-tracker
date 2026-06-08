@@ -317,7 +317,16 @@
         <div class="dashboard-col">
 
             <div class="map-card">
-                <h2>🗺️ Live Positie</h2>
+                <div class="map-card-header">
+                    <h2>🗺️ Live Positie</h2>
+                    <div class="map-address-search address-search-container">
+                        <input type="text"
+                               id="map-address-input"
+                               placeholder="🔍 Zoek adres of plaats..."
+                               autocomplete="off">
+                        <div class="address-suggestions" id="map-address-suggestions"></div>
+                    </div>
+                </div>
                 <div id="gps-waiting-badge">⏳ Wachten op GPS fix...</div>
                 <div id="map"></div>
                 <div class="map-info">
@@ -611,6 +620,7 @@
     <script src="{{ url_for('static', filename='js/thermal-display.js') }}"></script>
     <script src="{{ url_for('static', filename='js/socket-handlers.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modals.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/nominatim.js') }}"></script>
     <script src="{{ url_for('static', filename='js/tile-cache.js') }}"></script>
     <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>    
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
