@@ -317,6 +317,57 @@ def reverse_geocode(lat, lon, timeout=2.0):
 
     return None
 
+
+def ensure_addresses_filled(entries, save_after=True):
+    """
+    Loop over entries en haal voor elke entry zonder adres alsnog
+    via Nominatim het adres op. Slaat de aangevulde lijst terug naar
+    disk zodat we deze ophaal-poging niet bij elke export opnieuw doen.
+
+    Nominatim rate-limit: 1 request/sec. Bij 30 entries zonder adres
+    duurt dit ~30 sec. Voor offline veld-batch acceptabel.
+
+    Bij geen internet voor de eerste entry: stoppen we vroeg
+    (geen zin om 30x dezelfde error te krijgen) en geven terug wat
+    we hebben.
+
+    Returns (entries, n_filled): bijgewerkte lijst + hoeveel adressen
+    we deze keer extra hebben opgehaald.
+    """
+    n_filled = 0
+    n_failed_in_a_row = 0
+
+    for entry in entries:
+        if entry.get('address'):
+            continue  # al ingevuld, skip
+
+        # Stop vroeg als we drie keer op rij faalden — waarschijnlijk
+        # geen internet, geen zin om door te gaan
+        if n_failed_in_a_row >= 3:
+            print(f"[export] 3x op rij geen Nominatim-response, "
+                  f"stop met aanvullen")
+            break
+
+        lat = entry.get('lat')
+        lon = entry.get('lon')
+        if lat is None or lon is None:
+            continue
+
+        address = reverse_geocode(lat, lon)
+        if address:
+            entry['address'] = address
+            n_filled += 1
+            n_failed_in_a_row = 0
+            # Nominatim rate-limit: minstens 1 sec tussen requests
+            time.sleep(1.1)
+        else:
+            n_failed_in_a_row += 1
+
+    if n_filled > 0 and save_after:
+        save_log(entries)
+        print(f"[export] {n_filled} adressen alsnog opgehaald + gecached")
+
+    return entries, n_filled
     # ============================================
 # TILE CACHE (offline maps)
 # ============================================
@@ -1195,7 +1246,38 @@ def index():
 @app.route('/api/status')
 def get_status():
     return jsonify(status)
+def format_date_be(iso_or_other):
+    """
+    Converteer een ISO-datum string ('2026-06-08T20:23:19.209Z') naar
+    Belgische dag/maand/jaar notatie ('08/06/2026').
 
+    Robuust voor verschillende input-formaten:
+      - Volledig ISO met tijd  -> '08/06/2026'
+      - ISO zonder Z           -> '08/06/2026'
+      - Alleen YYYY-MM-DD      -> '08/06/2026'
+      - Lege string / None     -> ''
+      - Onparsebaar             -> originele waarde (geen crash)
+    """
+    if not iso_or_other:
+        return ''
+
+    from datetime import datetime
+
+    s = str(iso_or_other).strip()
+
+    # Probeer eerst volledige ISO met tijd (de typische frontend-waarde)
+    for fmt in ('%Y-%m-%dT%H:%M:%S.%fZ',
+                '%Y-%m-%dT%H:%M:%SZ',
+                '%Y-%m-%dT%H:%M:%S',
+                '%Y-%m-%d'):
+        try:
+            dt = datetime.strptime(s, fmt)
+            return dt.strftime('%d/%m/%Y')
+        except ValueError:
+            continue
+
+    # Onparsebaar — return as-is zodat de cel niet leeg is
+    return s
 
 @app.route('/api/export-xlsx', methods=['POST'])
 def export_xlsx():
@@ -1222,6 +1304,13 @@ def export_xlsx():
     entries = payload.get('entries', [])
     filename = payload.get('filename', 'vespatrack_log.xlsx')
 
+    # Voor entries zonder adres: probeer alsnog Nominatim aan te roepen.
+    # Adressen die binnenkomen worden gecached in coord-log.json zodat
+    # volgende export geen Nominatim-calls meer nodig heeft.
+    entries, n_filled = ensure_addresses_filled(entries, save_after=True)
+    if n_filled > 0:
+        print(f"[export] {n_filled} adressen vers opgehaald voor deze export")
+
     # --- Workbook + sheet aanmaken ---
     wb = Workbook()
     ws = wb.active
@@ -1230,7 +1319,7 @@ def export_xlsx():
     # --- Headers definiëren ---
     headers = [
         '#', 'Tijd', 'Datum', 'Bron', 'Status',
-        'Latitude', 'Longitude', 'Hoogte (m)', 'Notitie', 'Google Maps'
+        'Adres', 'Hoogte (m)', 'Notitie', 'Google Maps'
     ]
 
     # --- Header-stijl: vet wit op donkerblauw, gecentreerd ---
@@ -1282,19 +1371,24 @@ def export_xlsx():
         gmaps_url = f"https://www.google.com/maps?q={lat},{lon}"
         status = e.get('status', '')
         source = e.get('source', '')
+        address = e.get('address', '')
+
+        # Fallback bij ontbrekend adres: toon lat/lon zodat bestrijder
+        # nog steeds iets concreets ziet. Beter dan een lege cel.
+        if not address:
+            address = f"({lat:.5f}, {lon:.5f})"
 
         ws.cell(row=row_idx, column=1, value=row_idx - 1)
         ws.cell(row=row_idx, column=2, value=e.get('time', ''))
-        ws.cell(row=row_idx, column=3, value=e.get('date', ''))
+        ws.cell(row=row_idx, column=3, value=format_date_be(e.get('date', '')))
         ws.cell(row=row_idx, column=4, value=source_labels.get(source, source))
         ws.cell(row=row_idx, column=5, value=status_labels.get(status, status))
-        ws.cell(row=row_idx, column=6, value=lat)
-        ws.cell(row=row_idx, column=7, value=lon)
-        ws.cell(row=row_idx, column=8, value=alt)
-        ws.cell(row=row_idx, column=9, value=e.get('notes', ''))
+        ws.cell(row=row_idx, column=6, value=address)
+        ws.cell(row=row_idx, column=7, value=alt)
+        ws.cell(row=row_idx, column=8, value=e.get('notes', ''))
 
-        # Google Maps hyperlink
-        maps_cell = ws.cell(row=row_idx, column=10, value='Open in Maps')
+        # Google Maps hyperlink — bewaard zodat bestrijder kan navigeren
+        maps_cell = ws.cell(row=row_idx, column=9, value='Open in Maps')
         maps_cell.hyperlink = gmaps_url
         maps_cell.font = Font(color='FF0563C1', underline='single')
 
@@ -1306,29 +1400,33 @@ def export_xlsx():
         for col_idx in range(1, len(headers) + 1):
             cell = ws.cell(row=row_idx, column=col_idx)
             cell.border = thin_border
-            if col_idx in (1, 2, 3, 4, 5, 6, 7, 8):
+            if col_idx in (1, 2, 3, 4, 5):
+                # Tijd/Datum/Bron/Status/# gecentreerd
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            elif col_idx == 7:
+                # Hoogte gecentreerd
                 cell.alignment = Alignment(horizontal='center', vertical='center')
             else:
+                # Adres, Notitie, Google Maps links uitgelijnd met wrap
                 cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
 
-        # Lat/lon met 7 decimalen formatteren
-        ws.cell(row=row_idx, column=6).number_format = '0.0000000'
-        ws.cell(row=row_idx, column=7).number_format = '0.0000000'
-        ws.cell(row=row_idx, column=8).number_format = '0.00'
+        # Hoogte met 2 decimalen
+        ws.cell(row=row_idx, column=7).number_format = '0.00'
 
     # --- Kolombreedtes ---
     column_widths = {
         1: 5,    # #
         2: 11,   # Tijd
-        3: 24,   # Datum (ISO)
+        3: 13,   # Datum (DD/MM/YYYY)
         4: 14,   # Bron
         5: 18,   # Status
-        6: 13,   # Latitude
-        7: 13,   # Longitude
-        8: 11,   # Hoogte
-        9: 35,   # Notitie
-        10: 16,  # Google Maps link
+        6: 40,   # Adres (ruimte voor 'Sint-Pieters-Leeuw, Mechelsgatstraat 12')
+        7: 11,   # Hoogte
+        8: 35,   # Notitie
+        9: 16,   # Google Maps link
     }
+
+
     for col_idx, width in column_widths.items():
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
