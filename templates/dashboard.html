@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hornet Tracker Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
     <script src="/static/socket.io.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}" />
     <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
@@ -317,7 +318,16 @@
         <div class="dashboard-col">
 
             <div class="map-card">
-                <h2>🗺️ Live Positie</h2>
+                <div class="map-card-header">
+                    <h2>🗺️ Live Positie</h2>
+                    <div class="map-address-search address-search-container">
+                        <input type="text"
+                               id="map-address-input"
+                               placeholder="🔍 Zoek adres of plaats..."
+                               autocomplete="off">
+                        <div class="address-suggestions" id="map-address-suggestions"></div>
+                    </div>
+                </div>
                 <div id="gps-waiting-badge">⏳ Wachten op GPS fix...</div>
                 <div id="map"></div>
                 <div class="map-info">
@@ -377,9 +387,12 @@
                 <!-- ingevuld door JS -->
             </div>
 
-            <!-- Coordinaten preview -->
+            <!-- Coordinaten preview met adres -->
             <div style="background:#0f3460; padding:10px; border-radius:6px;
                         margin-bottom:14px; font-family:'Consolas',monospace; font-size:0.9em;">
+                <div id="log-modal-address-row" style="color:#f5a623; margin-bottom:4px; display:none;">
+                    🏠 <span id="log-modal-address">--</span>
+                </div>
                 <div>📍 <span id="log-modal-coords">--, --</span></div>
                 <div style="color:#aaa; margin-top:4px;">
                     Alt: <span id="log-modal-alt">--</span> m
@@ -611,6 +624,7 @@
     <script src="{{ url_for('static', filename='js/thermal-display.js') }}"></script>
     <script src="{{ url_for('static', filename='js/socket-handlers.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modals.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/nominatim.js') }}"></script>
     <script src="{{ url_for('static', filename='js/tile-cache.js') }}"></script>
     <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>    
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>

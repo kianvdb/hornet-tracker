@@ -31,9 +31,9 @@
 
         // Map laadt direct op fallback locatie (Brussel),
         // zoomt later in op echte GPS-fix.
-        window.initMap();
-
-   window.initCoordLogFromServer();    // haalt log van Pi
+       window.initMap();
+        window.initMapAddressSearch();      // adres-zoek in map card header
+        window.initCoordLogFromServer();    // haalt log van Pi
    
         // Module-specifieke socket handlers registreren.
         // Volgorde maakt niet uit — ze luisteren op verschillende events.

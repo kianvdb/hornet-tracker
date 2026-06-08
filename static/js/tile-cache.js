@@ -34,6 +34,7 @@ function openTileCacheModal() {
     refreshTileStats();
     resetLocationDisplay();
     document.getElementById('prefetch-address').value = '';
+    initTileCacheAutocomplete();
 }
 
 /**
@@ -267,171 +268,61 @@ async function clearAllTiles() {
     }
 }
 // ============================================
-// ADRES-AUTOCOMPLETE (Nominatim)
+// ADRES-AUTOCOMPLETE — gedelegeerd aan nominatim.js
 // ============================================
-//
-// Nominatim is OpenStreetMap's gratis geocoder. Rate limit: 1 req/sec.
-// We respecteren dat met een 400ms debounce — gebruiker moet stoppen
-// met typen voordat we de call doen.
 
-let addressSearchTimer = null;
-let lastAddressQuery = '';
+let tileCacheAutocompleteInit = false;
 
 /**
- * Triggered op elke input-change in het adresveld. Debounce naar
- * Nominatim om server-policy te respecteren.
+ * Lazy-initialize de autocomplete bij eerste modal-open. Gedaan via
+ * setupAddressAutocomplete uit nominatim.js zodat de adres-zoek-logica
+ * gedeeld is met de map-card adres-zoek.
+ */
+function initTileCacheAutocomplete() {
+    if (tileCacheAutocompleteInit) return;
+    const inputEl = document.getElementById('prefetch-address');
+    const sugEl   = document.getElementById('address-suggestions');
+    if (!inputEl || !sugEl) return;
+
+    window.setupAddressAutocomplete({
+        inputEl: inputEl,
+        suggestionEl: sugEl,
+        onSelect: function(lat, lon, name) {
+            document.getElementById('prefetch-lat').value = lat.toFixed(4);
+            document.getElementById('prefetch-lon').value = lon.toFixed(4);
+            inputEl.value = name;
+            setLocationDisplay(name, lat, lon);
+        }
+    });
+    tileCacheAutocompleteInit = true;
+}
+
+/**
+ * Wordt op de input nog steeds aangeroepen via oninput="onAddressInput()"
+ * vanuit de HTML. We laten dat staan en zorgen dat de autocomplete bij
+ * eerste typen klaar is.
  */
 function onAddressInput() {
-    const input = document.getElementById('prefetch-address');
-    const query = input.value.trim();
-
-    // Reset timer bij elke toetsaanslag
-    if (addressSearchTimer) clearTimeout(addressSearchTimer);
-
-    // Verberg suggesties bij lege input
-    if (query.length < 3) {
-        hideAddressSuggestions();
-        return;
-    }
-
-    // Skip als query niet wijzigde (focus zonder typen)
-    if (query === lastAddressQuery) return;
-
-    // Toon "zoeken..." state
-    showAddressLoading();
-
-    // Debounce: wacht 400ms na laatste toetsaanslag
-    addressSearchTimer = setTimeout(() => {
-        searchAddress(query);
-    }, 400);
+    initTileCacheAutocomplete();
+    // De autocomplete listener uit setupAddressAutocomplete handelt het
+    // verder af. Deze stub blijft bestaan zodat het HTML-attribuut werkt.
 }
 
-/**
- * Voer de geocoding-call uit naar Nominatim.
- * Filtert resultaten op België + buurlanden voor relevantie.
- */
-async function searchAddress(query) {
-    lastAddressQuery = query;
 
-    // Nominatim URL met:
-    //  - q: de zoekterm
-    //  - format: json
-    //  - limit: max 5 resultaten (voldoende voor dropdown)
-    //  - countrycodes: be,nl,fr,lu,de (omringende landen)
-    //  - accept-language: nl (Nederlandse adres-formattering bij voorkeur)
-    const url = `https://nominatim.openstreetmap.org/search?` +
-        `q=${encodeURIComponent(query)}&` +
-        `format=json&limit=5&` +
-        `countrycodes=be,nl,fr,lu,de&` +
-        `accept-language=nl`;
-
-    try {
-        const response = await fetch(url, {
-            headers: {
-                // Nominatim policy vereist user-agent identificatie
-                'Accept': 'application/json'
-            }
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const results = await response.json();
-
-        // Skip als de query intussen weer is gewijzigd (race-condition)
-        const currentQuery = document.getElementById('prefetch-address').value.trim();
-        if (currentQuery !== query) return;
-
-        renderAddressSuggestions(results);
-
-    } catch (err) {
-        console.error('[geocode] zoeken mislukt:', err);
-        document.getElementById('address-suggestions').innerHTML =
-            '<div class="address-empty">Zoeken mislukt — geen internet?</div>';
-    }
-}
-
-/**
- * Render suggestie-lijst onder het input-veld.
- */
-function renderAddressSuggestions(results) {
-    const container = document.getElementById('address-suggestions');
-
-    if (!results || results.length === 0) {
-        container.innerHTML = '<div class="address-empty">Geen resultaten</div>';
-        container.classList.add('show');
-        return;
-    }
-
-    let html = '';
-    for (const r of results) {
-        // display_name is vaak lang: "Inkendaal Ziekenhuis, Inkendaalstraat, ..., België"
-        // Splits in hoofd + detail voor compact display
-        const parts = r.display_name.split(',').map(s => s.trim());
-        const mainName = parts[0] || r.display_name;
-        const detailParts = parts.slice(1, 4); // beperkt tot 3 niveaus
-        const detail = detailParts.join(', ');
-
-        // Quote escapen voor onclick
-        const lat = parseFloat(r.lat);
-        const lon = parseFloat(r.lon);
-        const safeName = mainName.replace(/'/g, "\\'");
-
-        html += `
-            <div class="address-suggestion" onclick="selectAddress(${lat}, ${lon}, '${safeName}')">
-                <div class="addr-main">${escapeAddrHtml(mainName)}</div>
-                <div class="addr-detail">${escapeAddrHtml(detail)}</div>
-            </div>`;
-    }
-    container.innerHTML = html;
-    container.classList.add('show');
-}
-
-/**
- * Wanneer een suggestie wordt geklikt: vul lat/lon en sluit dropdown.
- */
-function selectAddress(lat, lon, name) {
-    document.getElementById('prefetch-lat').value = lat.toFixed(4);
-    document.getElementById('prefetch-lon').value = lon.toFixed(4);
-    document.getElementById('prefetch-address').value = name;
-    hideAddressSuggestions();
-    setLocationDisplay(name, lat, lon);
-}
-
-function showAddressLoading() {
-    const container = document.getElementById('address-suggestions');
-    container.innerHTML = '<div class="address-loading">Zoeken...</div>';
-    container.classList.add('show');
-}
-
-function hideAddressSuggestions() {
-    const container = document.getElementById('address-suggestions');
-    container.classList.remove('show');
-    container.innerHTML = '';
-}
-
-/**
- * Simpele HTML escape voor adres-content.
- */
-function escapeAddrHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
-
-// Sluit suggesties als je elders klikt
-document.addEventListener('click', function(e) {
-    const container = document.getElementById('address-search-container');
-    const suggestions = document.getElementById('address-suggestions');
-    if (!e.target.closest('.address-search-container')) {
-        if (suggestions) suggestions.classList.remove('show');
-    }
-});
 
 /**
  * Update de visuele locatie-bevestiging onder het adresveld.
  * Toont welke locatie is geselecteerd voordat operator op "Download" klikt.
  */
 function setLocationDisplay(name, lat, lon) {
+    // Bouw via DOM-API zodat we geen escape-helper nodig hebben
     const el = document.getElementById('prefetch-location');
-    el.innerHTML = `${escapeAddrHtml(name)} <span style="color:#888; font-size:0.85em;">(${lat.toFixed(4)}, ${lon.toFixed(4)})</span>`;
+    el.textContent = name + ' ';
+    const coordSpan = document.createElement('span');
+    coordSpan.style.color = '#888';
+    coordSpan.style.fontSize = '0.85em';
+    coordSpan.textContent = `(${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+    el.appendChild(coordSpan);
     el.classList.add('set');
 }
 
@@ -451,3 +342,4 @@ window.useCurrentDronePos  = useCurrentDronePos;
 window.startPrefetch       = startPrefetch;
 window.deleteOneSource     = deleteOneSource;
 window.clearAllTiles       = clearAllTiles;
+window.onAddressInput = onAddressInput;
