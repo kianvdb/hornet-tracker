@@ -85,9 +85,8 @@ function dispatchStatusUpdate(data) {
 
    
 
-    // --- Map (drone positie + trail) ---
-    window.updateMap(data.gps_lat || 0, data.gps_lon || 0, data.altitude || 0);
-
+   // --- Map (drone positie + heading + trail) ---
+    window.updateMap(data.gps_lat || 0, data.gps_lon || 0, data.altitude || 0, data.heading || 0);
     // --- Drone status card (armed, mode, batterij, hoogte) ---
     // Verdwijnt grotendeels in Doel 1. Voor nu inline.
     updateDroneStatusCard(data);

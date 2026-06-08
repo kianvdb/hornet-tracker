@@ -84,3 +84,29 @@
  
     #map            { height: 300px; }
 }
+
+/* ============================================
+   DRONE MARKER — SVG arrow met heading-rotatie
+   ============================================ */
+
+/* Container die roteert. Smooth transition zodat marker draait i.p.v.
+   abrupt naar nieuwe heading springt — voelt natuurlijker bij operator. */
+.drone-marker {
+    width: 32px;
+    height: 40px;
+    transition: transform 0.3s ease-out;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+    transform-origin: center;
+}
+
+.drone-marker svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Override Leaflet default styling — geen achtergrond/border om de divIcon */
+.drone-marker-icon {
+    background: transparent;
+    border: none;
+}

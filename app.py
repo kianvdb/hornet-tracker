@@ -117,6 +117,7 @@ status = {
 
     'gps_lat': 0, 'gps_lon': 0, 'gps_fix': False, 'gps_satellites': 0,
     'altitude': 0,
+    'heading': 0,
     'battery_voltage': 0, 'battery_percent': 0,
     'flight_mode': 'UNKNOWN', 'armed': False,
 
@@ -947,6 +948,11 @@ def mavlink_loop():
                     status['gps_lat'] = msg.lat / 1e7
                     status['gps_lon'] = msg.lon / 1e7
                     status['altitude'] = round(msg.relative_alt / 1000.0, 2)
+                    # Heading in centidegrees, 65535 = unknown (geen GPS-fix
+                    # of magnetometer-fout). Bij unknown houden we vorige waarde
+                    # zodat marker niet plotseling naar 0° (noord) springt.
+                    if msg.hdg != 65535:
+                        status['heading'] = round(msg.hdg / 100.0, 1)
                 elif msg_type in ('RADIO_STATUS', 'RADIO'):
                     last_radio_status = now
                     status['telem_connected'] = True

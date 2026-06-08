@@ -2,12 +2,11 @@
  * MAP — Leaflet kaart met drone tracking
  *
  * Bevat:
- *  - initMap()                 init bij page-load op fallback locatie (Brussel)
- *  - updateMap(lat, lon, alt)  update drone marker positie + trail
- *  - centerMap()               centreer kaart op huidige drone positie
- *  - toggleTrail()             trail aan/uit zetten
- *  - getCurrentMap()           geef Leaflet map instance terug (voor coord-log)
- *  - getCurrentTrailCount()    aantal trail punten (voor debugging/info)
+ *  - initMap()                         init bij page-load op fallback locatie (Brussel)
+ *  - updateMap(lat, lon, alt, heading) update drone marker positie + rotatie + trail
+ *  - centerMap()                       centreer kaart op huidige drone positie
+ *  - toggleTrail()                     trail aan/uit zetten
+ *  - getCurrentMap()                   geef Leaflet map instance terug (voor coord-log)
  *
  * Strategie:
  *  - Kaart laadt direct bij page-load op fallback locatie (uitgezoomd op
@@ -15,8 +14,10 @@
  *  - Bij eerste echte GPS-fix: zoom in op drone positie, plaats marker,
  *    verberg "wachten op fix" badge.
  *  - Trail accumuleert pas vanaf eerste echte fix (geen (0,0) punten).
+ *  - Drone marker is een SVG-pijl die roteert op basis van magnetometer-heading
+ *    uit MAVLink GLOBAL_POSITION_INT.hdg. Pijl-kop wijst in vlieg-richting.
  *
-* Afhankelijkheden:
+ * Afhankelijkheden:
  *  - Leaflet (vendored lokaal in static/vendor/leaflet/)
  *  - Tile cache via /tiles/<source>/{z}/{x}/{y}.png (Flask route)
  *  - HTML elementen: #map, #map-lat, #map-lon, #map-alt, #gps-waiting-badge
@@ -49,6 +50,53 @@ let showTrail = true;
 let hasGpsFix = false;          // false totdat eerste echte fix binnenkomt
 
 // ============================================
+// DRONE MARKER — SVG arrow
+// ============================================
+
+/**
+ * Bouw de HTML/SVG voor de drone marker. Pijl-kop wijst naar boven (0°)
+ * in de SVG; CSS-rotation past hem aan naar de actuele heading.
+ *
+ * Vormgeving:
+ *  - Driehoekige kop in dashboard-amber (#f5a623)
+ *  - Smalle rechthoekige staart eronder
+ *  - Witte contour voor leesbaarheid op zowel satelliet- als straat-kaart
+ *  - Drop-shadow zodat marker leesbaar blijft tegen lichte achtergronden
+ *
+ * @param {number} heading  graden 0-359 (0 = noord, 90 = oost)
+ */
+function buildDroneIconHtml(heading) {
+    return `
+        <div class="drone-marker" style="transform: rotate(${heading}deg);">
+            <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+                <!-- Paper airplane: pijl met v-inkeping achterkant -->
+                <polygon points="20,2 38,36 20,28 2,36"
+                         fill="#f5a623"
+                         stroke="#ffffff"
+                         stroke-width="1.5"
+                         stroke-linejoin="round"/>
+                <!-- Donkere midden-vouw voor 3D-effect -->
+                <polygon points="20,2 20,28 2,36"
+                         fill="#c8841a"
+                         opacity="0.6"/>
+            </svg>
+        </div>
+    `;
+}
+
+/**
+ * Maak een Leaflet divIcon voor de drone met gegeven heading.
+ */
+function createDroneIcon(heading) {
+    return L.divIcon({
+        html: buildDroneIconHtml(heading),
+        className: 'drone-marker-icon',  // geen Leaflet-default styling
+        iconSize: [32, 40],
+        iconAnchor: [16, 20]              // anker op midden van de pijl
+    });
+}
+
+// ============================================
 // INITIALISATIE
 // ============================================
 
@@ -64,7 +112,7 @@ function initMap() {
     });
 
     // --- Kaartlagen ---
- const osmLayer = L.tileLayer('/tiles/osm/{z}/{x}/{y}.png', {
+    const osmLayer = L.tileLayer('/tiles/osm/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap',
         maxZoom: 19
     });
@@ -106,36 +154,47 @@ function initMap() {
 }
 
 /**
- * Update drone positie. Wordt bij elke status_update van de server aangeroepen.
+ * Update drone positie + heading. Wordt bij elke status_update aangeroepen.
  * Negeer (0,0) coords — dat is "geen fix".
+ *
+ * @param {number} lat      latitude
+ * @param {number} lon      longitude
+ * @param {number} alt      hoogte in meters
+ * @param {number} heading  graden 0-359, default 0 (noord)
  */
-function updateMap(lat, lon, alt) {
+function updateMap(lat, lon, alt, heading) {
     // Skip lege/ongeldige coords
     if ((lat === 0 && lon === 0) || lat === null || lon === null) {
         return;
     }
 
+    // Default heading naar 0 als niet meegegeven (backwards compatibility)
+    const hdg = (typeof heading === 'number') ? heading : 0;
+
     // Eerste echte fix: zoom in, plaats marker, verberg badge
     if (!hasGpsFix) {
         hasGpsFix = true;
 
-        const droneIcon = L.divIcon({
-            html: '<div style="font-size:28px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">🚁</div>',
-            className: '',
-            iconSize: [28, 28],
-            iconAnchor: [14, 14]
-        });
-
-        droneMarker = L.marker([lat, lon], { icon: droneIcon }).addTo(map);
+        droneMarker = L.marker([lat, lon], { icon: createDroneIcon(hdg) }).addTo(map);
         map.setView([lat, lon], FIX_ZOOM);
 
         // Verberg "wachten op fix" badge
         const badge = document.getElementById('gps-waiting-badge');
         if (badge) badge.style.display = 'none';
 
-        console.log(`[map] Eerste GPS-fix: ${lat.toFixed(7)}, ${lon.toFixed(7)}`);
+        console.log(`[map] Eerste GPS-fix: ${lat.toFixed(7)}, ${lon.toFixed(7)}, heading ${hdg}°`);
     } else {
+        // Positie updaten
         droneMarker.setLatLng([lat, lon]);
+
+        // Heading updaten — we hergebruiken de div binnen het marker-element
+        // en zetten alleen de transform, zodat we niet bij elke update een
+        // nieuwe DOM-node hoeven te maken (efficienter + voorkomt flikker).
+        const el = droneMarker.getElement();
+        if (el) {
+            const inner = el.querySelector('.drone-marker');
+            if (inner) inner.style.transform = `rotate(${hdg}deg)`;
+        }
     }
 
     // Trail bijwerken
