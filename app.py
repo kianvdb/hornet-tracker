@@ -239,6 +239,84 @@ def generate_entry_id():
     return f"{timestamp_ms}-{random_hex}"
 
 
+def reverse_geocode(lat, lon, timeout=2.0):
+    """
+    Roep Nominatim reverse-geocode API aan om lat/lon naar leesbaar adres
+    te converteren. Returns een string in formaat "Gemeente, Straat Nummer"
+    of None bij geen internet / timeout / geen resultaat.
+
+    Voorbeelden:
+        50.7686, 4.2700  ->  "Vlezenbeek, Kerkstraat 5"
+        50.7100, 4.3500  ->  "Anderlecht, Nijverheidskaai 12"
+        50.7500, 4.2000  ->  "Sint-Pieters-Leeuw" (alleen gemeente bij weide)
+        midden in zee    ->  None
+
+    Nominatim usage policy:
+        - User-Agent vereist met identificatie
+        - Max 1 request per seconde (rate-limit), wij hebben hier geen
+          concurrent requests dus geen extra throttling nodig
+        - Bij commercieel gebruik: eigen Nominatim instance overwegen
+
+    Gebruikt twee seconden timeout zodat een trage Nominatim of geen
+    internet de log-opslag niet onnodig lang laat hangen.
+    """
+    import urllib.request
+    import urllib.error
+
+    url = (
+        f"https://nominatim.openstreetmap.org/reverse"
+        f"?format=jsonv2"
+        f"&lat={lat}"
+        f"&lon={lon}"
+        f"&zoom=18"            # straat-niveau detail
+        f"&addressdetails=1"   # opgesplitste address-velden in response
+        f"&accept-language=nl"
+    )
+    req = urllib.request.Request(url, headers={'User-Agent': TILE_USER_AGENT})
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            data = json.loads(response.read())
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as e:
+        print(f"[reverse_geocode] failed for {lat},{lon}: {e}")
+        return None
+
+    addr = data.get('address', {}) or {}
+
+    # Gemeente-naam: probeer in volgorde van specifiek naar algemeen.
+    # OSM gebruikt verschillende velden afhankelijk van land/regio:
+    #   - village    voor dorpen
+    #   - town       voor kleinere steden
+    #   - city       voor steden
+    #   - municipality is de officiele gemeente-grens (overkoepelend)
+    # We pakken de eerste die niet leeg is.
+    gemeente = (
+        addr.get('village')
+        or addr.get('town')
+        or addr.get('city')
+        or addr.get('municipality')
+        or addr.get('suburb')
+        or addr.get('county')
+    )
+
+    # Straat + huisnummer combineren
+    straat = addr.get('road') or addr.get('pedestrian') or addr.get('footway')
+    nummer = addr.get('house_number')
+
+    # Bouw output-string in formaat "Gemeente, Straat Nummer"
+    if gemeente and straat and nummer:
+        return f"{gemeente}, {straat} {nummer}"
+    if gemeente and straat:
+        return f"{gemeente}, {straat}"
+    if gemeente:
+        return gemeente
+    if straat and nummer:
+        return f"{straat} {nummer}"
+    if straat:
+        return straat
+
+    return None
+
     # ============================================
 # TILE CACHE (offline maps)
 # ============================================
@@ -1289,7 +1367,12 @@ def api_log_post():
     Voeg een nieuwe entry toe. Verwacht JSON body:
       {lat, lon, alt, time, date, source, status, notes}
     Server genereert het 'id' veld en voegt de entry achteraan toe.
-    Returns de aangemaakte entry inclusief id.
+
+    Bij opslag wordt geprobeerd het adres op te halen via Nominatim
+    reverse-geocode (2s timeout). Bij geen internet / timeout blijft
+    het address-veld leeg; export-tijd zal het dan alsnog proberen.
+
+    Returns de aangemaakte entry inclusief id en eventueel address.
     """
     payload = request.get_json(silent=True) or {}
 
@@ -1297,16 +1380,25 @@ def api_log_post():
     if 'lat' not in payload or 'lon' not in payload:
         return jsonify({'error': 'lat en lon zijn vereist'}), 400
 
+    lat = float(payload.get('lat', 0))
+    lon = float(payload.get('lon', 0))
+
+    # Probeer adres op te halen — bij falen blijft veld leeg
+    address = reverse_geocode(lat, lon)
+    if address:
+        print(f"[log] adres opgehaald: {address}")
+
     entry = {
-        'id':     generate_entry_id(),
-        'lat':    float(payload.get('lat', 0)),
-        'lon':    float(payload.get('lon', 0)),
-        'alt':    float(payload.get('alt', 0)),
-        'time':   payload.get('time', ''),
-        'date':   payload.get('date', ''),
-        'source': payload.get('source', 'manueel'),
-        'status': payload.get('status', ''),
-        'notes':  payload.get('notes', ''),
+        'id':      generate_entry_id(),
+        'lat':     lat,
+        'lon':     lon,
+        'alt':     float(payload.get('alt', 0)),
+        'time':    payload.get('time', ''),
+        'date':    payload.get('date', ''),
+        'source':  payload.get('source', 'manueel'),
+        'status':  payload.get('status', ''),
+        'notes':   payload.get('notes', ''),
+        'address': address or '',
     }
 
     entries = load_log()
