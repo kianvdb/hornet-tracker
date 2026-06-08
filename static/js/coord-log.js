@@ -232,10 +232,19 @@ function editCoord(id) {
         ? 'Oorspronkelijk geplaatst op drone-positie'
         : 'Oorspronkelijk handmatig geplaatst door operator';
 
-    document.getElementById('log-modal-coords').textContent =
+   document.getElementById('log-modal-coords').textContent =
         entry.lat.toFixed(7) + ', ' + entry.lon.toFixed(7);
     document.getElementById('log-modal-alt').textContent = entry.alt.toFixed(1);
 
+    // Adres tonen als bekend (anders rij verbergen)
+    const addrRow = document.getElementById('log-modal-address-row');
+    const addrSpan = document.getElementById('log-modal-address');
+    if (entry.address) {
+        addrSpan.textContent = entry.address;
+        addrRow.style.display = '';
+    } else {
+        addrRow.style.display = 'none';
+    }
     document.getElementById('log-modal-status').value = entry.status || '';
     document.getElementById('log-modal-notes').value  = entry.notes  || '';
 
@@ -262,6 +271,9 @@ function openLogModal(data) {
     document.getElementById('log-modal-coords').textContent =
         data.lat.toFixed(7) + ', ' + data.lon.toFixed(7);
     document.getElementById('log-modal-alt').textContent = data.alt.toFixed(1);
+
+    // Nieuwe entry: adres komt pas na server-side reverse-geocode bij opslag
+    document.getElementById('log-modal-address-row').style.display = 'none';
 
     document.getElementById('log-modal-status').value = data.defaultStatus || '';
     document.getElementById('log-modal-notes').value  = '';
@@ -373,9 +385,12 @@ function refreshMarkerPopup(id, displayNumber) {
  */
 function buildPopupHtml(entry, displayNumber) {
     const iconEmoji = entry.source === 'drone' ? '🚁' : '📍';
-    let html = `<b>#${displayNumber}</b> ${iconEmoji} ${entry.source}<br>` +
-               `${entry.lat.toFixed(7)}, ${entry.lon.toFixed(7)}<br>` +
-               `Alt: ${entry.alt.toFixed(1)}m · ${entry.time}`;
+    let html = `<b>#${displayNumber}</b> ${iconEmoji} ${entry.source}<br>`;
+    if (entry.address) {
+        html += `<b>${escapeHtml(entry.address)}</b><br>`;
+    }
+    html += `${entry.lat.toFixed(7)}, ${entry.lon.toFixed(7)}<br>` +
+            `Alt: ${entry.alt.toFixed(1)}m · ${entry.time}`;
     if (entry.status) {
         html += `<br><b>Status:</b> ${entry.status.replace('_', ' ')}`;
     }
@@ -429,6 +444,7 @@ function updateLogDisplay() {
                     <span class="coord-time">#${i+1} ${e.time}</span>
                     ${statusBadge}
                 </div>
+                ${e.address ? `<div class="coord-address" title="Adres uit reverse-geocoding">📍 ${escapeHtml(e.address)}</div>` : ''}
                 <div style="margin-top:3px;">
                     <span class="coord-value" onclick="copyCoord('${safeId}')" title="Klik om te kopiëren">${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}</span>
                     <span class="coord-alt"> · ${e.alt.toFixed(1)}m</span>

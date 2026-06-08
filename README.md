@@ -26,6 +26,7 @@ korte afstand, en biedt bediening van de vlucht.
 - [Offline veldwerk](#offline-veldwerk)
 - [Thermisch beeld](#thermisch-beeld)
 - [LoRa signaal](#lora-signaal)
+- [Adres-lookup](#adres-lookup)
 - [Ontwikkelen](#ontwikkelen)
 - [Roadmap](#roadmap)
 - [Licentie](#licentie)
@@ -122,8 +123,11 @@ de Pixhawk.
   voor REST-calls naar de backend
 - **Offline tiles** — Flask-route serveert lokaal gecachte map-tiles
   uit `data/tiles/`, met internet-fallback bij cache-miss
-- **Adres-geocoding** — Nominatim API (OpenStreetMap) voor adres → lat/lon
-  resolution bij offline-tile prefetch
+- **Adres-geocoding** — Nominatim API (OpenStreetMap) voor zowel
+  forward geocoding (adres → coördinaten, voor zoekvelden) als reverse
+  geocoding (coördinaten → adres, voor log-entries en Excel-export).
+  Gedeelde utility-module `nominatim.js` voor consistente debounce en
+  rate-limit-handling tussen de meerdere consumers in het dashboard.
 
 Het dashboard draait als achtergrondproces op de Raspberry Pi via een
 systemd service (`hornet-tracker.service`). Zie [Installatie](#installatie)
@@ -310,7 +314,8 @@ hornet-tracker/
 ├── app.py                          Flask + Socket.io backend, MAVLink,
 │                                   RTL-SDR/LoRa SignalSource, WiFi status,
 │                                   command handlers, thermal camera loop,
-│                                   Excel-export endpoint, tile-cache routes
+│                                   Excel-export endpoint, tile-cache routes,
+│                                   Nominatim reverse-geocoding helpers
 ├── prefetch_tiles.py               CLI tool: bulk-download tiles voor offline gebruik
 ├── README.md                       dit bestand
 ├── requirements.txt                Python dependencies
@@ -321,7 +326,7 @@ hornet-tracker/
 │
 ├── data/                           runtime persistente data (gitignored)
 │   ├── README.md                   uitleg over wat hier hoort
-│   ├── coord-log.json              gelogde entries, gegenereerd op de Pi
+│   ├── coord-log.json              gelogde entries (met adres-cache), op de Pi
 │   └── tiles/                      lokaal gecachte map-tiles per source
 │       ├── osm/<z>/<x>/<y>.png     OpenStreetMap stratenplan
 │       ├── sat/<z>/<x>/<y>.png     ArcGIS satelliet (JPEG inhoud)
@@ -329,6 +334,10 @@ hornet-tracker/
 │
 └── static/
     ├── socket.io.min.js            client library (vendored)
+    │
+    ├── img/                        statische afbeeldingen
+    │   ├── vespatrack-logo.svg     logo in navbar
+    │   └── favicon.svg             browser-tab icoon (SVG, schaalbaar)
     │
     ├── vendor/leaflet/             Leaflet library lokaal gehost (offline-proof)
     │   ├── leaflet.js
@@ -341,17 +350,22 @@ hornet-tracker/
     │   ├── navbar.css              vaste navbar bovenaan met status-popovers
     │   ├── cards.css               grid cards + status rows + signaalbalkjes
     │   ├── signal.css              LoRa signal card met 3-tier hierarchie
-    │   ├── map.css                 Leaflet kaart + GPS-waiting badge
-    │   ├── coord-log.css           gelogde coördinaten + status badges + toast
+    │   ├── map.css                 Leaflet kaart + drone-marker + adres-zoek
+    │   ├── coord-log.css           gelogde coördinaten + status badges + adres
     │   ├── controls.css            knoppen + modals + log/export/tile-cache modals
     │   └── thermal.css             warmtecamera canvas + stats + baseline-knoppen
     │                               + palette dropdown
     │
     └── js/                         modulaire JavaScript per concern
         ├── utils.js                rssi helpers, toast, card status
-        ├── map.js                  Leaflet init, drone marker, trail, click-handler
-        ├── coord-log.js            log entries, map-click pin, status/notitie,
-        │                           edit, delete, REST naar backend, Excel-export
+        ├── nominatim.js            gedeelde Nominatim utility: forward search
+        │                           + autocomplete-flow voor input-velden
+        ├── map.js                  Leaflet init, drone marker (SVG arrow met
+        │                           heading-rotatie), trail, click-handler,
+        │                           adres-zoek in map card header
+        ├── coord-log.js            log entries, map-click pin, status/notitie/
+        │                           adres, edit, delete, REST naar backend,
+        │                           Excel-export
         ├── drone-controls.js       arm/disarm/mode + command result handler
         ├── signal-display.js       LoRa signal card 3-tier rendering: RSSI/badge/bar,
         │                           SNR + packet-age, packets count + tracker ID
@@ -360,7 +374,7 @@ hornet-tracker/
         ├── navbar.js               popover toggle + click-outside-to-close
         ├── socket-handlers.js      connect/disconnect/status_update dispatch
         ├── modals.js               shutdown/reboot/arm/log/export/tile-cache dialogen
-        ├── tile-cache.js           cache stats + prefetch UI + Nominatim adres-zoek
+        ├── tile-cache.js           cache stats + prefetch UI (gebruikt nominatim.js)
         └── main.js                 bootstrap (socket + init + log fetchen van Pi)
 ```
 
@@ -368,9 +382,11 @@ hornet-tracker/
 
 `dashboard.html` laadt de JS-modules in deze volgorde:
 
-1. `utils.js`, `map.js`, `coord-log.js`, `drone-controls.js`,
-   `signal-display.js`, `thermal-display.js` — definiëren functies op
-   `window`, geen socket nodig.
+1. `utils.js`, `nominatim.js`, `map.js`, `coord-log.js`,
+   `drone-controls.js`, `signal-display.js`, `thermal-display.js` —
+   definiëren functies op `window`, geen socket nodig. `nominatim.js`
+   moet vóór de modules die hem consumeren (`map.js`, `tile-cache.js`)
+   geladen worden.
 2. `socket-handlers.js` — handlers die `window.socket` gebruiken.
 3. `modals.js` — dialog-logica voor alle modals.
 4. `tile-cache.js` — offline tiles UI + Nominatim adres-zoek.
@@ -391,7 +407,7 @@ Het dashboard is bereikbaar op poort 5000. Afhankelijk van de setup:
 | URL                              | Context                                  |
 | -------------------------------- | ---------------------------------------- |
 | `http://hoornaar-tracker:5000`   | via mDNS (thuisnetwerk ethernet)         |
-| `http://192.168.1.3:5000`        | direct IP op thuisnetwerk                |
+| `http://192.168.1.4:5000`        | direct IP op thuisnetwerk                |
 | `http://192.168.4.1:5000`        | HornetTracker hotspot (veldwerk)         |
 
 De Pi draait optioneel een eigen WiFi-hotspot op `wlan1` (Comfast
@@ -647,6 +663,116 @@ tijdens een missie te vermijden.
 
 ---
 
+## Adres-lookup
+
+Voor de operator-workflow is een **leesbare adres-aanduiding** veel
+nuttiger dan ruwe lat/lon-coördinaten. Een bestrijder die de Excel-
+export opent wil direct zien "Vlezenbeek, Kerkstraat 5" — niet
+"50.76860, 4.27000" en dan handmatig in Google Maps gaan plakken.
+Dit project gebruikt Nominatim (OpenStreetMap's gratis geocoder) in
+beide richtingen.
+
+### Forward geocoding: adres-zoek in de kaart
+
+Operator typt in het zoekveld in de map card header een adres of
+plaatsnaam (bv. "Dorpsstraat 42 Vlezenbeek"). Suggesties verschijnen
+via Nominatim's `search` endpoint, gedebounced op 400 ms (rate-limit
+beleid van de gratis service is 1 req/sec).
+
+Bij selectie van een suggestie centreert en zoomt de kaart op de
+gekozen locatie — **maar er wordt géén pin geplaatst**. Dat is een
+bewuste UX-keuze: een melding "nest in tuin van Dorpsstraat 42" kan
+gaan over een nest in een weide drie huizen verder. Het adres is
+navigatie-hulp om snel in de juiste omgeving te komen; operator klikt
+vervolgens zelf op de exacte nest-positie op de kaart.
+
+Zoom-niveau bij selectie is 17 (iets uitgezoomder dan FIX_ZOOM 18 voor
+de drone) zodat operator ook de omgeving rond het adres ziet.
+
+### Reverse geocoding: adres bij elke entry
+
+Wanneer een entry wordt opgeslagen (`POST /api/log`) roept de backend
+`reverse_geocode(lat, lon)` aan. Resultaat wordt opgeslagen in het
+`address`-veld van de entry in `coord-log.json`. Formaat is
+gestandaardiseerd op `"Gemeente, Straat Nummer"`:
+
+- `50.7686, 4.2700`  →  `"Vlezenbeek, Kerkstraat 5"`
+- `50.7100, 4.3500`  →  `"Anderlecht, Nijverheidskaai 12"`
+- Adres zonder huisnummer (weide): `"Vlezenbeek, Kerkstraat"`
+- Geen straat te vinden (bos): `"Sint-Pieters-Leeuw"`
+- Midden in zee of Nominatim-fout: leeg veld
+
+### Internet-strategie: hybride
+
+In het veld heeft de Pi typisch geen internet — alleen de Comfast
+hotspot voor de operator-laptop. Daarom is de strategie hybride:
+
+1. **Bij entry-opslag**: probeer Nominatim met 2 sec timeout. Bij
+   geen internet blijft het veld leeg.
+2. **Bij Excel-export**: voor elke entry zonder adres, probeer
+   opnieuw via Nominatim. Bij succes wordt het adres terug
+   opgeslagen in `coord-log.json` (cache-effect — volgende export
+   doet geen nieuwe call meer voor dezelfde entry).
+3. **Rate-limit respect**: 1.1 sec tussen ophaal-calls tijdens
+   export-batch. Bij 3 opeenvolgende fails (geen internet) stopt de
+   batch vroeg.
+4. **Excel-fallback**: bij ontbrekend adres toont de cel
+   `"(50.76860, 4.27000)"` zodat bestrijder nog steeds iets concreets
+   ziet (en de Google Maps hyperlink in de laatste kolom blijft
+   sowieso werken).
+
+Workflow voor offline veldwerk:
+
+1. Pi zonder internet → operator logt 15 nest-posities → entries
+   opgeslagen zonder adres
+2. Pi terug op ethernet thuis → operator klikt Excel-export → backend
+   doet 15 Nominatim-calls (~16 sec voor 15 entries) → adressen
+   opgeslagen in `coord-log.json`
+3. Excel verschijnt met alle adressen ingevuld
+4. Volgende export = direct, geen Nominatim-calls meer nodig
+
+### Waar het adres in het dashboard verschijnt
+
+Eens een entry een adres heeft, wordt het op drie plekken getoond:
+
+- **Coord-log lijst** rechts van de kaart: amber-kleurige regel
+  `📍 Gemeente, Straat Nummer` boven de coördinaten. Ellipsis bij te
+  lange straatnamen.
+- **Marker-popup** op de kaart: adres dikgedrukt onder het entry-nummer,
+  dan coördinaten en hoogte eronder.
+- **Edit-modal**: oranje rij `🏠 adres` boven de coördinaten-preview
+  als de entry een adres heeft. Bij nieuwe entries verborgen (komt
+  pas na server-side reverse-geocode bij opslag).
+
+### Excel-export
+
+Naast de gewone status-, tijd-, en notitie-kolommen toont de Excel
+nu de Adres-kolom in plaats van aparte Latitude/Longitude-kolommen.
+Die zijn weggehaald omdat ze redundant zijn met de Google Maps
+hyperlink in de laatste kolom — bestrijder klikt op de link en zit
+in Google Maps op de exacte coördinaten. Voor visuele inschatting
+volstaat het leesbare adres in plaats van een lange decimale waarde.
+
+De Datum-kolom is ook aangepast naar Belgische `DD/MM/YYYY` notatie
+(de ISO-string met tijd erin was redundant met de aparte Tijd-kolom).
+
+### Gedeelde code-organisatie
+
+De Nominatim-aanroep zit in twee plaatsen:
+
+- **Backend** `app.py` — `reverse_geocode()` voor coords → adres bij
+  entry-opslag en export-tijd
+- **Frontend** `static/js/nominatim.js` — `nominatimSearch()` en
+  `setupAddressAutocomplete()` voor forward zoekvelden
+
+`nominatim.js` is bewust een gedeelde module: twee consumers
+(`tile-cache.js` voor offline-prefetch-gebied selectie en `map.js`
+voor de kaart-navigatie) gebruiken dezelfde debounce-logica en
+result-rendering. Toevoegen van een derde consumer (bv. een
+adres-zoek in de log-modal) zou een paar regels code zijn.
+
+---
+
 ## Ontwikkelen
 
 ### Git branch-strategie
@@ -689,6 +815,11 @@ feature inzoomen op de chronologie van een onderdeel.
 - `feature/lora-packet-decoding` — SX1278 Ra-01 ontvanger via SPI met
   pyLoRa, polling-based RX, decodering van `HT,<id>,<count>` beacon-
   protocol, 3-tier dashboard layout met RSSI/SNR/packet-age
+- `feature/drone-marker` — SVG paper-airplane marker die roteert op
+  MAVLink heading + VespaTrack logo in navbar
+- `feature/address-lookup` — Nominatim forward search in map card +
+  reverse-geocoding bij log-opslag en Excel-export, gedeelde
+  utility-module `nominatim.js`, favicon
 
 ### Commit messages
 
@@ -757,14 +888,15 @@ incrementele stap zonder dependencies te hoeven introduceren.
   - klikbare Google Maps hyperlinks per entry
   - bevroren header-rij bij scrollen
   - bestandsnaam met Belgische datum-notatie
+  - Adres-kolom (ipv lat/lon) met automatische reverse-geocoding voor
+    entries zonder adres, Belgische DD/MM/YYYY datum-notatie
 - Offline kaart-tiles voor veldwerk zonder internet:
   - Lokaal gehoste Leaflet library (geen CDN-afhankelijkheid)
   - Flask tile-route met lokale cache + internet-fallback
   - Drie tile-bronnen: OSM stratenplan, ArcGIS satelliet, straatnamen overlay
   - CLI tool `prefetch_tiles.py` voor bulk-downloads
   - Cache-management UI in het dashboard met stats, prefetch en wissen
-  - Adres-zoeken via Nominatim (OpenStreetMap geocoder) voor gemakkelijke
-    selectie van prefetch-gebieden
+  - Adres-zoeken via Nominatim voor gemakkelijke selectie van prefetch-gebieden
   - Live progress-bar tijdens prefetch via status-polling
 - Thermisch beeld in dashboard:
   - Pimoroni MLX90640 via I2C, Adafruit CircuitPython library
@@ -796,7 +928,21 @@ incrementele stap zonder dependencies te hoeven introduceren.
     abrupt springt bij richting-verandering
   - Werkt los van GPS-fix: heading is direct beschikbaar zodra
     magnetometer-data binnenkomt
-- VespaTrack logo in navbar ter vervanging van emoji + tekst    
+- VespaTrack logo in navbar + SVG favicon in browser-tab
+- Adres-lookup voor leesbare locatie-aanduiding:
+  - Forward geocoding in map card header voor snelle navigatie naar
+    een gemelde locatie zonder visueel zoeken
+  - Reverse geocoding bij log-opslag (Pi-side) zodat elke entry een
+    leesbare "Gemeente, Straat Nummer" krijgt
+  - Hybride internet-strategie: bij ontbrekend adres alsnog ophalen
+    tijdens Excel-export en cachen in coord-log.json (geen herhaalde
+    Nominatim-calls)
+  - Adres getoond in coord-log lijst, marker-popups en edit-modal
+  - Geen automatische pin bij adres-selectie: operator behoudt
+    controle over de exacte log-positie (melders weten zelden exact
+    waar het nest zit, alleen het meld-adres)
+  - Gedeelde `nominatim.js` utility voor consistente debounce en
+    rate-limit-handling tussen meerdere consumers in het dashboard
 
 ### In planning
 
