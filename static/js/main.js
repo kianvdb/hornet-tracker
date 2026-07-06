@@ -37,10 +37,11 @@
    
         // Module-specifieke socket handlers registreren.
         // Volgorde maakt niet uit — ze luisteren op verschillende events.
-        window.registerCoreSocketHandlers();          // connect / disconnect / status_update
+       window.registerCoreSocketHandlers();          // connect / disconnect / status_update
         window.registerCommandResultHandler();        // arm/disarm/mode feedback
         window.registerBaselineStatusHandler();       // baseline reset knop state
-        window.registerPopoverOutsideClick();  
+        window.registerMissionHandlers();             // missie voortgang (mission_update)
+        window.registerPopoverOutsideClick();
 
         console.log('[main] Klaar.');
     });

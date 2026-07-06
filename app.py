@@ -18,7 +18,7 @@ Toekomstige LoRa ontvanger (Ra-01 via SPI):
 Kalibratie van beacon v2 (zie beacon.ino):
   - SF9, BW 125 kHz, 433 MHz, ~200ms time-on-air, elke 500ms
 """
-
+import mission  # onze demo-missie module
 from flask import Flask, render_template, jsonify, request, send_file
 import io
 import json
@@ -159,6 +159,14 @@ baseline_reset_requested = False
 # naar de Pixhawk te sturen. None betekent: geen verbinding actief.
 mav_connection = None
 mav_lock = threading.Lock()
+
+def get_mav_connection():
+    """
+    Getter voor de gedeelde MAVLink-connectie, gebruikt door mission.py.
+    Returnt de huidige connectie of None. Thread-safe via mav_lock.
+    """
+    with mav_lock:
+        return mav_connection
 
 # ============================================
 # COORDINATE LOG STORAGE (JSON op disk)
@@ -1947,6 +1955,80 @@ def handle_set_mode(data):
             'success': False,
             'message': f'MAVLink fout: {e}'
         })
+
+
+        # ============================================
+# MISSIE + NOODKNOPPEN (demo autonome vlucht)
+# ============================================
+
+@socketio.on('start_mission')
+def handle_start_mission():
+    """
+    START MISSIE-knop. Start de voorgeprogrammeerde demo-sequentie in een
+    aparte thread. De missie-module leest de gedeelde 'status' dict voor
+    telemetrie en gebruikt get_mav_connection() voor commando's.
+    """
+    print('START MISSIE ontvangen van frontend')
+    success, message = mission.start_mission(status, get_mav_connection, socketio.emit)
+    socketio.emit('command_result', {'success': success, 'message': message})
+
+
+@socketio.on('mission_stop_hang')
+def handle_stop_hang():
+    """
+    STOP & HANG-knop. Zet de drone in LOITER: hij blijft hangen op zijn
+    huidige positie en hoogte. Backup voor de zender-switch naar midden.
+    Het draaiende missie-script detecteert de mode-wijziging zelf en stopt.
+    """
+    from pymavlink import mavutil
+    print('STOP & HANG (LOITER) ontvangen')
+    success, message = handle_mode_change_to(5, 'LOITER')  # 5 = LOITER
+    socketio.emit('command_result', {'success': success, 'message': message})
+
+
+@socketio.on('mission_rtl')
+def handle_mission_rtl():
+    """
+    RTL-knop. Drone vliegt terug naar het opstijgpunt en landt (auto-disarm).
+    Backup voor de zender-switch naar onder.
+    """
+    print('RTL ontvangen')
+    success, message = handle_mode_change_to(6, 'RTL')  # 6 = RTL
+    socketio.emit('command_result', {'success': success, 'message': message})
+
+
+@socketio.on('mission_land')
+def handle_mission_land():
+    """
+    LAND NU-knop. Drone daalt recht naar beneden op huidige positie en
+    landt (auto-disarm). Dit is de enige nood-actie die NIET op de
+    zender-switch zit.
+    """
+    print('LAND NU ontvangen')
+    success, message = handle_mode_change_to(9, 'LAND')  # 9 = LAND
+    socketio.emit('command_result', {'success': success, 'message': message})
+
+
+def handle_mode_change_to(mode_id, mode_name):
+    """
+    Gedeelde helper: wijzig de flight mode en bevestig via HEARTBEAT.
+    Hergebruikt de logica uit handle_set_mode maar als directe functie
+    zodat de noodknoppen hem kunnen aanroepen. Returnt (success, message).
+    """
+    with mav_lock:
+        mav = mav_connection
+    if mav is None:
+        return False, 'Pixhawk niet verbonden'
+    try:
+        mav.set_mode(mode_id)
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            msg = mav.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
+            if msg and msg.custom_mode == mode_id:
+                return True, f'{mode_name} actief'
+        return False, f'{mode_name} niet bevestigd'
+    except Exception as e:
+        return False, f'MAVLink fout: {e}'
 
 @socketio.on('shutdown')
 def handle_shutdown():

@@ -209,39 +209,83 @@
             </div>
 
             <!-- DRONE CONTROLS -->
-            <div class="card">
-                <h2>🎮 Besturing</h2>
+            <!-- DRONE CONTROLS + MISSIE -->
+<div class="card">
+    <h2>🎮 Besturing</h2>
 
-                <!-- Armed status indicator (was vroeger in Drone Status card) -->
-                <div style="text-align:center; margin-bottom:15px;">
-                    <span id="armed-status" class="status-badge disarmed">DISARMED</span>
-                </div>
+    <!-- Armed status indicator -->
+    <div style="text-align:center; margin-bottom:15px;">
+        <span id="armed-status" class="status-badge disarmed">DISARMED</span>
+    </div>
 
-                <div style="display:flex;gap:10px;margin-bottom:15px;">
-                    <button class="btn btn-success" id="btn-arm" onclick="armDrone()" style="flex:1;padding:12px;font-size:1.1em;">
-                        🔓 ARM
-                    </button>
-                    <button class="btn btn-danger" id="btn-disarm" onclick="disarmDrone()" style="flex:1;padding:12px;font-size:1.1em;">
-                        🔒 DISARM
-                    </button>
-                </div>
+    <!-- ===== MISSIE-SECTIE ===== -->
+    <!-- Pre-flight status: toont of het veilig is om te starten -->
+    <div id="preflight-status" style="padding:10px; border-radius:6px;
+         background:#0f3460; margin-bottom:12px; font-size:0.9em;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+            <span style="color:#aaa;">GPS-fix</span>
+            <span id="pf-gps">--</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+            <span style="color:#aaa;">Satellieten</span>
+            <span id="pf-sats">--</span>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+            <span style="color:#aaa;">RTL-hoogte</span>
+            <span id="pf-rtl-alt">-- m</span>
+        </div>
+    </div>
 
-                <div style="margin-bottom:12px;">
-                    <span class="status-label" style="display:block;margin-bottom:6px;">Flight Mode</span>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(0)">STABILIZE</button>
-                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(2)">ALT_HOLD</button>
-                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(5)">LOITER</button>
-                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(6)">RTL</button>
-                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(9)">LAND</button>
-                        <button class="btn btn-small btn-secondary mode-btn" onclick="setMode(4)">GUIDED</button>
-                    </div>
-                </div>
+    <!-- START MISSIE — groot en duidelijk -->
+    <button class="btn btn-success" id="btn-start-mission"
+            onclick="startMission()"
+            style="width:100%; padding:14px; font-size:1.15em; margin-bottom:10px;">
+        🚀 START MISSIE
+    </button>
 
-                <div id="command-feedback" style="font-size:0.85em;color:#aaa;min-height:20px;margin-top:8px;">
-                    Klaar voor commando's
-                </div>
-            </div>
+    <!-- Missie-voortgang -->
+    <div id="mission-status" style="text-align:center; font-size:0.9em;
+         color:#aaa; min-height:20px; margin-bottom:12px;">
+        Klaar om te starten
+    </div>
+
+    <!-- ===== NOODKNOPPEN ===== -->
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:15px;">
+        <button class="btn btn-secondary" onclick="missionStopHang()"
+                style="padding:12px; font-size:0.95em;" title="Blijf hangen op huidige positie (LOITER)">
+            ✋ STOP<br>& HANG
+        </button>
+        <button class="btn btn-secondary" onclick="missionRTL()"
+                style="padding:12px; font-size:0.95em;" title="Terug naar opstijgpunt en landen">
+            🏠 RTL
+        </button>
+        <button class="btn btn-danger" onclick="missionLand()"
+                style="padding:12px; font-size:0.95em;" title="Direct dalen en landen op huidige plek">
+            🛬 LAND<br>NU
+        </button>
+    </div>
+
+    <!-- ===== HANDMATIG (op de grond) ===== -->
+    <!-- ===== HANDMATIG (op de grond) ===== -->
+<details style="margin-bottom:12px;">
+    <summary style="cursor:pointer; color:#aaa; font-size:0.9em;">
+        Handmatig armen (grondtest)
+    </summary>
+    <div style="display:flex;gap:10px;margin:12px 0;">
+        <button class="btn btn-success" id="btn-arm" onclick="armDrone()"
+                style="flex:1;padding:10px;">🔓 ARM</button>
+        <button class="btn btn-danger" id="btn-disarm" onclick="disarmDrone()"
+                style="flex:1;padding:10px;">🔒 DISARM</button>
+    </div>
+    <div style="font-size:0.8em; color:#888; margin-top:4px;">
+        Alleen voor grondtest met props eraf. Nooit ARM met props tenzij je gaat vliegen.
+    </div>
+</details>
+
+    <div id="command-feedback" style="font-size:0.85em;color:#aaa;min-height:20px;margin-top:8px;">
+        Klaar voor commando's
+    </div>
+</div>
 
           <div class="card">
                 <div class="thermal-header">
@@ -620,6 +664,7 @@
     <script src="{{ url_for('static', filename='js/map.js') }}"></script>
     <script src="{{ url_for('static', filename='js/coord-log.js') }}"></script>
     <script src="{{ url_for('static', filename='js/drone-controls.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/mission-controls.js') }}"></script>
     <script src="{{ url_for('static', filename='js/signal-display.js') }}"></script>
     <script src="{{ url_for('static', filename='js/thermal-display.js') }}"></script>
     <script src="{{ url_for('static', filename='js/socket-handlers.js') }}"></script>

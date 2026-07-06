@@ -95,10 +95,14 @@ function dispatchStatusUpdate(data) {
     // --- Quick status cards bovenaan (batterij, wifi, SiK) ---
     // Verdwijnen volledig in Doel 1 (vervangen door navbar).
   
-    updateBatteryNavbar(data);
+   updateBatteryNavbar(data);
     updateWifiNavbar(data);
     updateGpsNavbar(data);
 
+    // --- Missie pre-flight status (mission-controls.js) ---
+    // Bewaar laatste status voor de client-side pre-flight check in startMission()
+    window.lastKnownStatus = data;
+    if (window.updatePreflightStatus) window.updatePreflightStatus(data);
 }
 
 /**
