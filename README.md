@@ -93,9 +93,18 @@ de Pixhawk.
 
 ### Communicatie
 
-- **USB-TTL CH340** — Pi ↔ Pixhawk verbinding (MAVLink op TELEM2)
-- **SiK Radio 433 MHz** — backup-telemetrie naar QGroundControl
+- **Directe USB (CDC-ACM)** — Pi ↔ Pixhawk verbinding voor MAVLink,
+  via de USB-C poort van de Pixhawk 6C. Bidirectioneel (telemetrie
+  ontvangen én commando's sturen) en betrouwbaar. De Pi spreekt de
+  poort aan via het stabiele `/dev/serial/by-id/`-pad zodat het
+  device-nummer niet kan wisselen tussen boots.
 - **Comfast MT7612U** — USB WiFi-adapter op de Pi, host van veldhotspot
+
+> **Historisch**: eerdere versies gebruikten een USB-TTL CH340-adapter
+> naar TELEM2 en een SiK-radio als backup-telemetrie. Beide zijn
+> vervangen door de directe USB-verbinding, die bidirectioneel
+> betrouwbaar bleek waar de TTL-route pakketten verloor.
+
 
 ---
 
@@ -237,7 +246,8 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/hornet-tracker
 ExecStart=/usr/bin/python3 /home/pi/hornet-tracker/app.py
-Restart=on-failure
+Environment=PYTHONUNBUFFERED=1
+Restart=always
 RestartSec=5
 
 [Install]
@@ -254,22 +264,21 @@ sudo systemctl start hornet-tracker
 
 Vanaf nu start het dashboard automatisch bij elke boot van de Pi.
 
-### 6. Udev-rule voor Pixhawk
+### 6. Pixhawk USB-verbinding
 
-Zodat de Pixhawk altijd verschijnt als `/dev/ttyPixhawk` in plaats van
-een wisselende `/dev/ttyUSB0`:
-
-```text
-# /etc/udev/rules.d/99-pixhawk.rules
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="ttyPixhawk"
-```
-
-Herladen na aanpassing:
+De Pixhawk wordt via USB-C rechtstreeks op de Pi aangesloten en verschijnt
+als `/dev/ttyACM0`. Omdat dat nummer tussen boots kan wisselen, gebruikt
+`app.py` het stabiele by-id-pad dat altijd naar déze Pixhawk wijst:
 
 ```bash
-sudo udevadm control --reload-rules
-sudo udevadm trigger
+ls -l /dev/serial/by-id/
+# usb-Holybro_Pixhawk6C_<serienummer>-if00 -> ../../ttyACM0
 ```
+
+Dat pad staat in `MAVLINK_DEVICE` bovenaan `app.py`. Een udev-regel is
+niet meer nodig; het by-id-pad is inherent stabiel. De baudrate is een
+formaliteit omdat CDC-ACM hem negeert.
+
 
 ### 7. Comfast hotspot configureren (optioneel, voor veldwerk)
 
