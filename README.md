@@ -867,6 +867,30 @@ incrementele stap zonder dependencies te hoeven introduceren.
 
 ### Afgerond
 
+- Autonome demo-missie via het dashboard:
+  - Voorgeprogrammeerde sequentie: opstijgen 1,5 m → hover → 360°
+    draai → 2 m vooruit → hover → landen (auto-disarm)
+  - START MISSIE-knop plus noodknoppen STOP & HANG (LOITER), RTL en
+    LAND NU als backup voor de zender-switch
+  - Pre-flight statusblok (GPS-fix, satellieten, RTL-hoogte) voordat
+    de missie start
+  - Veiligheidsmodel: de zender heeft altijd voorrang. Gaat de drone
+    uit GUIDED (operator neemt over via SwC-switch, of failsafe), dan
+    stopt het missie-script onmiddellijk. Nooit disarmen in de lucht;
+    elke landing leidt tot auto-disarm door ArduCopter zelf.
+  - Missie-module (`mission.py`) draait in een aparte thread, leest de
+    gedeelde status-dict voor telemetrie (fire-and-forget commando's)
+- MAVLink over directe USB met centrale ack-afhandeling:
+  - Overgestapt van USB-TTL naar TELEM2 (`/dev/ttyUSB0`, CH340) naar
+    de directe USB-verbinding met de Pixhawk (`/dev/serial/by-id/...`),
+    die bidirectioneel betrouwbaar bleek waar de TTL-route pakketten
+    verloor
+  - `AckMailbox`: thread-safe postbus zodat alleen `mavlink_loop`
+    `recv_match` aanroept en COMMAND_ACK-berichten distribueert naar
+    wachtende command-handlers. Elimineert de ack-race die wegvallende
+    verbinding bij knoppen en vals "piloot heeft overgenomen" gaf
+  - Mode-wijzigingen bevestigd via `status['flight_mode']` (door
+    `mavlink_loop` gevuld) i.p.v. een concurrerende eigen leeslus
 - Real-time MAVLink telemetrie (GPS, batterij, hoogte, mode, armed)
 - RTL-SDR signal detection met automatische baseline + peak-hold
   (als legacy/fallback pad behouden in SignalSource interface)
