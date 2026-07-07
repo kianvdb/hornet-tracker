@@ -58,8 +58,12 @@ MEASURE_INTERVAL = 0.1       # 10 Hz update naar dashboard
 BASELINE_NUM_READINGS = 10   # aantal metingen voor initiele baseline
 
 # --- MAVLink ---
-MAVLINK_DEVICE = '/dev/ttyPixhawk'
-MAVLINK_BAUD = 57600
+# Directe USB-verbinding naar de Pixhawk (interface 0 = MAVLink telemetrie).
+# We gebruiken bewust NIET de USB-TTL naar TELEM2 (/dev/ttyUSB0, CH340) of de
+# SiK-radio: die zijn trager en onbetrouwbaar gebleken. De directe USB-poort
+# is CDC-ACM, dus de baudrate wordt genegeerd — 115200 is een formaliteit.
+MAVLINK_DEVICE = '/dev/serial/by-id/usb-Holybro_Pixhawk6C_32003E001651333337363133-if00'
+MAVLINK_BAUD = 115200
 
 # --- WiFi hotspot ---
 WIFI_HOTSPOT_IFACE = 'wlan1'
@@ -167,6 +171,62 @@ def get_mav_connection():
     """
     with mav_lock:
         return mav_connection
+
+class AckMailbox:
+    """
+    Thread-safe 'postbus' voor COMMAND_ACK-berichten.
+ 
+    Werking:
+      - Een handler die een ack verwacht roept arm(command_id) aan vlak
+        VOORDAT hij het commando verstuurt. Dat zet de verwachting klaar.
+      - mavlink_loop() roept deliver(command_id, result) aan zodra er een
+        COMMAND_ACK binnenkomt. Alleen als het command_id matcht met wat de
+        handler verwacht, wordt de ack afgeleverd en de handler gewekt.
+      - De handler roept wait(timeout) aan: blokkeert tot de ack er is of
+        de timeout verstrijkt.
+ 
+    We ondersteunen bewust maar één wachtende ack tegelijk. Dat is genoeg:
+    de dashboard-knoppen worden nooit twee tegelijk ingedrukt, en de missie
+    stuurt sequentieel. Zo blijft het simpel en voorspelbaar.
+    """
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._event = threading.Event()
+        self._expected_command = None   # command_id waarop we wachten
+        self._result = None             # MAV_RESULT code van de ack
+ 
+    def arm(self, command_id):
+        """Zet klaar dat we een ack voor dit command_id verwachten."""
+        with self._lock:
+            self._expected_command = command_id
+            self._result = None
+            self._event.clear()
+ 
+    def deliver(self, command_id, result):
+        """
+        Aangeroepen door mavlink_loop bij een COMMAND_ACK. Levert af als het
+        command_id matcht met de verwachting. Returnt True als afgeleverd.
+        """
+        with self._lock:
+            if self._expected_command is not None and command_id == self._expected_command:
+                self._result = result
+                self._event.set()
+                return True
+        return False
+ 
+    def wait(self, timeout):
+        """
+        Wacht tot de verwachte ack binnen is (of timeout). Returnt de
+        MAV_RESULT code, of None bij timeout.
+        """
+        got = self._event.wait(timeout)
+        with self._lock:
+            self._expected_command = None
+            return self._result if got else None
+ 
+ 
+# Globale postbus-instantie (naast mav_connection / mav_lock)
+ack_mailbox = AckMailbox()
 
 # ============================================
 # COORDINATE LOG STORAGE (JSON op disk)
@@ -1019,13 +1079,13 @@ def wifi_loop():
 # MAVLINK (ongewijzigd)
 # ============================================
 def mavlink_loop():
-    global status
+    global status, mav_connection
     try:
         from pymavlink import mavutil
     except ImportError:
         print("!! pymavlink niet geinstalleerd")
         return
-
+ 
     COPTER_MODES = {
         0: 'STABILIZE', 1: 'ACRO', 2: 'ALT_HOLD', 3: 'AUTO',
         4: 'GUIDED', 5: 'LOITER', 6: 'RTL', 7: 'CIRCLE',
@@ -1036,7 +1096,7 @@ def mavlink_loop():
         26: 'AUTOROTATE', 27: 'AUTO_RTL'
     }
     last_radio_status = 0
-
+ 
     while True:
         try:
             print(f"MAVLink verbinden met {MAVLINK_DEVICE} @ {MAVLINK_BAUD}...")
@@ -1044,16 +1104,14 @@ def mavlink_loop():
             mav.wait_heartbeat(timeout=10)
             print(f"MAVLink OK! System {mav.target_system}, Component {mav.target_component}")
             status['pixhawk_connected'] = True
-            # Maak connectie beschikbaar voor command handlers
-            global mav_connection
             with mav_lock:
                 mav_connection = mav
-
+ 
             mav.mav.request_data_stream_send(
                 mav.target_system, mav.target_component,
                 mavutil.mavlink.MAV_DATA_STREAM_ALL, 4, 1
             )
-
+ 
             while True:
                 msg = mav.recv_match(blocking=True, timeout=5)
                 if msg is None:
@@ -1064,7 +1122,15 @@ def mavlink_loop():
                     break
                 msg_type = msg.get_type()
                 now = time.time()
-
+ 
+                # ---- NIEUW: COMMAND_ACK opvangen en in de postbus leggen ----
+                # Dit is de kern van de fix: de centrale lus is de ENIGE die
+                # recv_match doet, en distribueert acks naar wachtende handlers.
+                if msg_type == 'COMMAND_ACK':
+                    ack_mailbox.deliver(msg.command, msg.result)
+                    # We gaan door — een COMMAND_ACK bevat geen telemetrie.
+                    continue
+ 
                 if msg_type == 'HEARTBEAT':
                     status['pixhawk_connected'] = True
                     status['armed'] = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
@@ -1085,9 +1151,6 @@ def mavlink_loop():
                     status['gps_lat'] = msg.lat / 1e7
                     status['gps_lon'] = msg.lon / 1e7
                     status['altitude'] = round(msg.relative_alt / 1000.0, 2)
-                    # Heading in centidegrees, 65535 = unknown (geen GPS-fix
-                    # of magnetometer-fout). Bij unknown houden we vorige waarde
-                    # zodat marker niet plotseling naar 0° (noord) springt.
                     if msg.hdg != 65535:
                         status['heading'] = round(msg.hdg / 100.0, 1)
                 elif msg_type in ('RADIO_STATUS', 'RADIO'):
@@ -1100,7 +1163,7 @@ def mavlink_loop():
                     status['telem_txbuf'] = msg.txbuf
                     worst_snr = min(msg.rssi - msg.noise, msg.remrssi - msg.remnoise)
                     status['telem_quality'] = max(0, min(100, int(worst_snr * 100 / 50)))
-
+ 
                 if now - last_radio_status > 5:
                     status['telem_connected'] = False
         except Exception as e:
@@ -1811,59 +1874,40 @@ def handle_thermal_baseline_clear():
         'message': 'Baseline gewist'
     })
 
-# ============================================
-# DRONE COMMAND HANDLERS (frontend → Pixhawk)
-# ============================================
-#
-# Elk commando volgt hetzelfde patroon:
-#   1. check of mav_connection bestaat (Pixhawk verbonden?)
-#   2. stuur COMMAND_LONG via pymavlink
-#   3. wacht max 5s op COMMAND_ACK met match op het juiste command-id
-#   4. emit 'command_result' terug naar frontend met success + message
-#
-# De frontend (drone-controls.js) heeft al een 5s timeout met fallback-
-# bericht 'Geen reactie van Pi/Pixhawk', dus deze handlers hoeven daar
-# niet over te zorgen — alleen valide responses sturen.
-
 COMMAND_ACK_TIMEOUT = 5.0   # seconden
-
 def send_command_and_wait_ack(command_id, params, command_name):
     """
-    Stuur een MAV_CMD via command_long_send en wacht op COMMAND_ACK.
-
-    Returns (success: bool, message: str). Geschikt om direct in
-    socketio.emit('command_result', ...) te dumpen.
+    Stuur een MAV_CMD via command_long_send en wacht op de COMMAND_ACK die
+    mavlink_loop() in de postbus legt. Roept ZELF NOOIT recv_match aan.
+ 
+    Returns (success: bool, message: str).
     """
     from pymavlink import mavutil
-
+ 
     with mav_lock:
         mav = mav_connection
-
     if mav is None:
         return False, "Pixhawk niet verbonden"
-
+ 
     try:
-        # COMMAND_LONG met 7 params (sommige worden 0 gelaten als niet gebruikt)
+        # 1. Zet de postbus klaar VOOR we sturen, zodat we een ack die
+        #    supersnel terugkomt niet missen.
+        ack_mailbox.arm(command_id)
+ 
+        # 2. Stuur het commando.
         mav.mav.command_long_send(
-            mav.target_system,
-            mav.target_component,
-            command_id,
-            0,    # confirmation
+            mav.target_system, mav.target_component,
+            command_id, 0,
             params[0], params[1], params[2], params[3],
             params[4], params[5], params[6],
         )
-
-        # Wacht op ACK voor exact dit commando-id
-        ack = mav.recv_match(
-            type='COMMAND_ACK',
-            blocking=True,
-            timeout=COMMAND_ACK_TIMEOUT,
-            condition=f'COMMAND_ACK.command=={command_id}'
-        )
-
-        if ack is None:
+ 
+        # 3. Wacht passief op de ack uit de postbus (geen recv_match).
+        result = ack_mailbox.wait(COMMAND_ACK_TIMEOUT)
+ 
+        if result is None:
             return False, f"Geen ACK ontvangen voor {command_name}"
-
+ 
         result_codes = {
             mavutil.mavlink.MAV_RESULT_ACCEPTED:  (True,  f"{command_name} geaccepteerd"),
             mavutil.mavlink.MAV_RESULT_DENIED:    (False, f"{command_name} geweigerd door Pixhawk"),
@@ -1871,8 +1915,8 @@ def send_command_and_wait_ack(command_id, params, command_name):
             mavutil.mavlink.MAV_RESULT_FAILED:    (False, f"{command_name} mislukt"),
             mavutil.mavlink.MAV_RESULT_TEMPORARILY_REJECTED: (False, f"{command_name} tijdelijk geweigerd (check arming/GPS)"),
         }
-        return result_codes.get(ack.result, (False, f"Onbekende ACK: {ack.result}"))
-
+        return result_codes.get(result, (False, f"Onbekende ACK: {result}"))
+ 
     except Exception as e:
         return False, f"MAVLink fout: {e}"
 
@@ -1903,58 +1947,43 @@ def handle_disarm_drone():
     socketio.emit('command_result', {'success': success, 'message': message})
 
 
-@socketio.on('set_mode')
-def handle_set_mode(data):
+def _mode_id_to_name(mode_id):
+    """Mode-ID naar naam, spiegelt COPTER_MODES in mavlink_loop."""
+    names = {0:'STABILIZE',2:'ALT_HOLD',4:'GUIDED',5:'LOITER',6:'RTL',9:'LAND'}
+    return names.get(mode_id, f'MODE_{mode_id}')
+
+def change_mode(mode_id, mode_name=None):
     """
-    Wijzig flight mode. Frontend stuurt {'mode': <int>} met ArduCopter mode-ID
-    uit COPTER_MODES (zie mavlink_loop). Gebruikt mav.set_mode() helper i.p.v.
-    raw COMMAND_LONG omdat pymavlink dat voor ArduCopter beter afhandelt.
+    Wijzig de flight mode en bevestig via status['flight_mode'].
+    Roept ZELF NOOIT recv_match aan.
     """
-    from pymavlink import mavutil
-    mode_id = data.get('mode')
-    print(f'SET_MODE commando ontvangen: mode_id={mode_id}')
+    if mode_name is None:
+        mode_name = _mode_id_to_name(mode_id)
 
     with mav_lock:
         mav = mav_connection
-
     if mav is None:
-        socketio.emit('command_result', {
-            'success': False,
-            'message': 'Pixhawk niet verbonden'
-        })
-        return
+        return False, 'Pixhawk niet verbonden'
 
     try:
-        # ArduCopter mode wijzigen via set_mode helper
         mav.set_mode(mode_id)
-
-        # Wacht op HEARTBEAT met de nieuwe custom_mode als bevestiging
-        # (ArduCopter stuurt geen COMMAND_ACK voor mode-changes via set_mode)
-        import time
         deadline = time.time() + COMMAND_ACK_TIMEOUT
-        confirmed = False
         while time.time() < deadline:
-            msg = mav.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
-            if msg and msg.custom_mode == mode_id:
-                confirmed = True
-                break
-
-        if confirmed:
-            socketio.emit('command_result', {
-                'success': True,
-                'message': f'Mode gewijzigd naar ID {mode_id}'
-            })
-        else:
-            socketio.emit('command_result', {
-                'success': False,
-                'message': f'Mode-wijziging niet bevestigd binnen {COMMAND_ACK_TIMEOUT}s'
-            })
-
+            if status.get('flight_mode') == mode_name:
+                return True, f'{mode_name} actief'
+            time.sleep(0.1)
+        return False, f'{mode_name} niet bevestigd binnen {COMMAND_ACK_TIMEOUT:.0f}s'
     except Exception as e:
-        socketio.emit('command_result', {
-            'success': False,
-            'message': f'MAVLink fout: {e}'
-        })
+        return False, f'MAVLink fout: {e}'
+
+
+@socketio.on('set_mode')
+def handle_set_mode(data):
+    """Wijzig flight mode. Frontend stuurt {'mode': <int>}."""
+    mode_id = data.get('mode')
+    print(f'SET_MODE ontvangen: mode_id={mode_id}')
+    success, message = change_mode(mode_id)
+    socketio.emit('command_result', {'success': success, 'message': message})
 
 
         # ============================================
@@ -1975,60 +2004,26 @@ def handle_start_mission():
 
 @socketio.on('mission_stop_hang')
 def handle_stop_hang():
-    """
-    STOP & HANG-knop. Zet de drone in LOITER: hij blijft hangen op zijn
-    huidige positie en hoogte. Backup voor de zender-switch naar midden.
-    Het draaiende missie-script detecteert de mode-wijziging zelf en stopt.
-    """
-    from pymavlink import mavutil
+    """STOP & HANG-knop -> LOITER. Drone blijft hangen op huidige positie."""
     print('STOP & HANG (LOITER) ontvangen')
-    success, message = handle_mode_change_to(5, 'LOITER')  # 5 = LOITER
+    success, message = change_mode(5, 'LOITER')
     socketio.emit('command_result', {'success': success, 'message': message})
-
-
+ 
 @socketio.on('mission_rtl')
 def handle_mission_rtl():
-    """
-    RTL-knop. Drone vliegt terug naar het opstijgpunt en landt (auto-disarm).
-    Backup voor de zender-switch naar onder.
-    """
+    """RTL-knop -> terug naar opstijgpunt en landen."""
     print('RTL ontvangen')
-    success, message = handle_mode_change_to(6, 'RTL')  # 6 = RTL
+    success, message = change_mode(6, 'RTL')
     socketio.emit('command_result', {'success': success, 'message': message})
-
-
+ 
 @socketio.on('mission_land')
 def handle_mission_land():
-    """
-    LAND NU-knop. Drone daalt recht naar beneden op huidige positie en
-    landt (auto-disarm). Dit is de enige nood-actie die NIET op de
-    zender-switch zit.
-    """
+    """LAND NU-knop -> dalen en landen op huidige plek."""
     print('LAND NU ontvangen')
-    success, message = handle_mode_change_to(9, 'LAND')  # 9 = LAND
+    success, message = change_mode(9, 'LAND')
     socketio.emit('command_result', {'success': success, 'message': message})
 
 
-def handle_mode_change_to(mode_id, mode_name):
-    """
-    Gedeelde helper: wijzig de flight mode en bevestig via HEARTBEAT.
-    Hergebruikt de logica uit handle_set_mode maar als directe functie
-    zodat de noodknoppen hem kunnen aanroepen. Returnt (success, message).
-    """
-    with mav_lock:
-        mav = mav_connection
-    if mav is None:
-        return False, 'Pixhawk niet verbonden'
-    try:
-        mav.set_mode(mode_id)
-        deadline = time.time() + 3
-        while time.time() < deadline:
-            msg = mav.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
-            if msg and msg.custom_mode == mode_id:
-                return True, f'{mode_name} actief'
-        return False, f'{mode_name} niet bevestigd'
-    except Exception as e:
-        return False, f'MAVLink fout: {e}'
 
 @socketio.on('shutdown')
 def handle_shutdown():
