@@ -801,7 +801,7 @@ class LoRaSource(SignalSource):
                 crc_error = flags.get('crc_error', 0)
                 payload_raw = self._lora.read_payload(nocheck=True)
                 rssi = self._lora.get_pkt_rssi_value()
-                snr_raw = self._lora.get_pkt_snr_value()
+                snr_value = self._lora.get_pkt_snr_value()
 
                 # Clear flags + restart RX voor volgende packet
                 # Wis alle relevante IRQ flags na packet-handling
@@ -837,11 +837,12 @@ class LoRaSource(SignalSource):
             except ValueError:
                 continue
 
-            # Convert SNR: pyLoRa returnt ruwe register byte (signed) — echte
-            # dB = byte / 4. Library doet die deling al in nieuwe versies,
-            # maar in de versie die we hebben (0.3.1) niet altijd — defensief:
-            # als de waarde fysiek onmogelijk hoog is (>20 dB), delen we zelf.
-            snr_db = snr_raw if abs(snr_raw) <= 20 else snr_raw / 4.0
+            # pyLoRa's get_pkt_snr_value() past de kwart-dB-schaling al toe; de
+            # waarde is dus geen ruwe registerbyte. De oude heuristiek
+            # (`snr_raw if abs(...) <= 20 else snr_raw / 4.0`) deelde in het
+            # grote bereik een tweede keer en was daarmee fout.
+            # Zie SX127x/LoRa.py -> get_pkt_snr_value().
+            snr_db = snr_value
 
             # Update state — alleen primitieve types, atomic in CPython
             self._last_rssi = float(rssi)
