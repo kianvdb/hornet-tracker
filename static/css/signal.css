@@ -159,35 +159,6 @@
     font-family: 'Consolas', monospace;
 }
 
-/* --- TIER 3 — administratief, compact --- */
-
-.lora-tier3 {
-    display: flex;
-    justify-content: space-between;
-    gap: 14px;
-    margin-top: 8px;
-    padding: 6px 10px;
-    background: #0a1530;
-    border-radius: 4px;
-    font-size: 0.8em;
-}
-
-.lora-metric-sm {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.lora-metric-sm .lora-metric-label {
-    margin-bottom: 0;
-}
-
-.lora-metric-value-sm {
-    color: #ccc;
-    font-weight: bold;
-    font-family: 'Consolas', monospace;
-}
-
 /* --- TIER 2 — SNR-balk (signaalgetrouwheid) --- */
 /*
    Schaal: -10 dB (leeg) tot +12 dB (vol).

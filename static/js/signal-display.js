@@ -1,14 +1,12 @@
 /**
- * SIGNAL-DISPLAY — LoRa signal card update logica
+ * SIGNAL-DISPLAY — hoornaarsignaal card update logica
  *
  * Render-strategie:
  *   - Tier 1: RSSI (groot getal) + detectie badge + absolute bar
- *   - Tier 2: SNR + laatste packet age (link-kwaliteit)
- *   - Tier 3: packet count + tracker ID (administratief)
+ *   - Tier 2: signaalgetrouwheid (SNR) met eigen bar + laatst ontvangen
  *
- * RSSI-bar mapt -120 dBm (links, leeg) tot -40 dBm (rechts, vol):
- *   bar_pct = (rssi + 120) / 80 * 100
- *   clampt op [0, 100]
+ * RSSI-bar mapt -120 dBm (links, leeg) tot -40 dBm (rechts, vol).
+ * SNR-bar mapt -10 dB (leeg) tot +12 dB (vol).
  *
  * Detectie-criterium:
  *   - signal_detected = true wanneer packet binnen 3s ontvangen
@@ -16,7 +14,7 @@
  *
  * Update-bron:
  *   - status_update events bevatten signal_power, signal_detected,
- *     lora_packet_count, lora_last_tracker_id, lora_last_seen_sec, lora_snr
+ *     lora_last_seen_sec, lora_snr
  *   - signal_loop in app.py emits ~10 Hz
  */
 
@@ -114,19 +112,6 @@ function updateSignalCard(data) {
     if (ageEl) {
         const age = data.lora_last_seen_sec;
         ageEl.textContent = formatPacketAge(typeof age === 'number' ? age : -1);
-    }
-
-    // TIER 3: packet count + tracker ID
-    const countEl = document.getElementById('lora-packet-count');
-    const trackerEl = document.getElementById('lora-tracker-id');
-
-    if (countEl) {
-        countEl.textContent = data.lora_packet_count || 0;
-    }
-
-    if (trackerEl) {
-        const id = data.lora_last_tracker_id;
-        trackerEl.textContent = (id && id > 0) ? `ID ${id}` : 'ID --';
     }
 }
 
