@@ -871,12 +871,14 @@ class LoRaSource(SignalSource):
         if self._last_seen == 0:
             # Nog nooit een packet ontvangen
             status['lora_last_seen_sec'] = -1
+            status['lora_snr'] = 0.0      # geen signaal -> geen getrouwheid
             return self.SILENCE_FLOOR
 
         age = now - self._last_seen
         status['lora_last_seen_sec'] = round(age, 1)
 
         if age > self.SILENCE_TIMEOUT:
+            status['lora_snr'] = 0.0      # geen signaal -> geen getrouwheid
             return self.SILENCE_FLOOR
 
         return self._last_rssi

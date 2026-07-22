@@ -85,13 +85,15 @@ function updateSignalCard(data) {
 
     const snr = (typeof data.lora_snr === 'number') ? data.lora_snr : 0;
 
-    if (snrEl) {
+    // "Geen signaal" is geen SNR-waarde: leeg de balk en tekst i.p.v.
+    // de laatst ontvangen waarde te laten hangen als de zender uit gaat.
+    if (data.signal_detected) {
         const sign = snr >= 0 ? '+' : '';
-        snrEl.textContent = sign + snr.toFixed(1) + ' dB';
-    }
-
-    if (snrBarEl) {
-        snrBarEl.style.width = snrToPercent(snr) + '%';
+        if (snrEl) snrEl.textContent = sign + snr.toFixed(1) + ' dB';
+        if (snrBarEl) snrBarEl.style.width = snrToPercent(snr) + '%';
+    } else {
+        if (snrEl) snrEl.textContent = '-- dB';
+        if (snrBarEl) snrBarEl.style.width = '0%';
     }
 
     if (badgeEl) {
