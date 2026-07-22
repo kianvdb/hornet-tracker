@@ -187,3 +187,39 @@
     font-weight: bold;
     font-family: 'Consolas', monospace;
 }
+
+/* --- TIER 2 — SNR-balk (signaalgetrouwheid) --- */
+/*
+   Schaal: -10 dB (leeg) tot +12 dB (vol).
+   Ondergrens -10: onder de SF7-demodulatievloer (~-7,5 dB) komt er
+   geen packet meer binnen. Zichtbare balk bij een zwak-maar-werkend
+   signaal is duidelijker voor de gebruiker dan een lege balk.
+   Bovengrens +12: veldmeting gaf +14,5 dB, wat boven het gebruikelijke
+   SX1278-plafond ligt — die valt hier op vol. Bijstellen na het
+   360°-stralingsdiagram.
+
+   Kleiner dan .lora-bar-container zodat de RSSI-balk de primaire
+   blijft en de SNR-balk visueel ondergeschikt is.
+*/
+
+.snr-block .snr-bar-container {
+    width: 100%;
+    height: 8px;
+    background: #0a1530;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 6px;
+    border: 1px solid #1a2540;
+}
+
+.snr-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg,
+        #ef4444 0%,        /* -10 dB: rood */
+        #f5a623 45%,       /* ~0 dB: oranje */
+        #84cc16 73%,       /* ~+6 dB: geelgroen */
+        #4ade80 100%       /* +12 dB: helder groen */
+    );
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}

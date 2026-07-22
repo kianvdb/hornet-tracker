@@ -30,6 +30,24 @@ function rssiToPercent(rssi) {
     return Math.max(0, Math.min(100, pct));
 }
 
+/**
+ * Map SNR (dB) naar percentage voor de signaalgetrouwheid-balk.
+ * -10 dB = 0%, +12 dB = 100%, lineair daartussen.
+ *
+ * Bereik-keuze:
+ *   - Ondergrens -10 dB ligt net onder de SF7-demodulatiegrens (~-7,5 dB).
+ *     Komt er nog een packet binnen, dan is de balk zichtbaar gevuld.
+ *   - Bovengrens +12 dB: veldmeting op de beacon gericht gaf +14,5 dB,
+ *     dat clampt hier op vol. Van de beacon af gaf +1,5 dB -> ~52%.
+ *     Dat verschil is de richtingaanwijzing die de gebruiker moet zien.
+ *
+ * TODO: bijstellen na het 360°-stralingsdiagram (echte min/max in
+ * onze opstelling).
+ */
+function snrToPercent(snr) {
+    const pct = ((snr + 10) / 22) * 100;
+    return Math.max(0, Math.min(100, pct));
+}
 
 /**
  * Format laatste-packet-age in een leesbare string.
@@ -62,6 +80,22 @@ function updateSignalCard(data) {
         rssiEl.textContent = data.signal_power.toFixed(0) + ' dBm';
     }
 
+    // TIER 2: signaalgetrouwheid (SNR) + laatst ontvangen
+    const snrEl = document.getElementById('lora-snr');
+    const snrBarEl = document.getElementById('snr-bar-fill');
+    const ageEl = document.getElementById('lora-last-seen');
+
+    const snr = (typeof data.lora_snr === 'number') ? data.lora_snr : 0;
+
+    if (snrEl) {
+        const sign = snr >= 0 ? '+' : '';
+        snrEl.textContent = sign + snr.toFixed(1) + ' dB';
+    }
+
+    if (snrBarEl) {
+        snrBarEl.style.width = snrToPercent(snr) + '%';
+    }
+
     if (badgeEl) {
         if (data.signal_detected) {
             badgeEl.textContent = '● Signaal';
@@ -76,16 +110,7 @@ function updateSignalCard(data) {
         barEl.style.width = rssiToPercent(data.signal_power) + '%';
     }
 
-    // TIER 2: SNR + packet age
-    const snrEl = document.getElementById('lora-snr');
-    const ageEl = document.getElementById('lora-last-seen');
-
-    if (snrEl) {
-        const snr = data.lora_snr || 0;
-        const sign = snr >= 0 ? '+' : '';
-        snrEl.textContent = sign + snr.toFixed(1) + ' dB';
-    }
-
+    // TIER 2: laatst ontvangen packet-age
     if (ageEl) {
         const age = data.lora_last_seen_sec;
         ageEl.textContent = formatPacketAge(typeof age === 'number' ? age : -1);
@@ -139,3 +164,4 @@ function resetBaseline() {
 window.updateSignalCard              = updateSignalCard;
 window.registerBaselineStatusHandler = registerBaselineStatusHandler;
 window.resetBaseline                 = resetBaseline;
+window.snrToPercent = snrToPercent;

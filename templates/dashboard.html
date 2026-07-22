@@ -183,17 +183,20 @@
                     <span>-40 dBm</span>
                 </div>
 
-                <!-- TIER 2: link-kwaliteit metrics -->
-                <div class="lora-tier2">
-                    <div class="lora-metric">
-                        <div class="lora-metric-label">SNR</div>
-                        <div class="lora-metric-value" id="lora-snr">-- dB</div>
-                    </div>
-                    <div class="lora-metric">
-                        <div class="lora-metric-label">Laatst ontvangen signaal</div>
-                        <div class="lora-metric-value" id="lora-last-seen">--</div>
-                    </div>
-                </div>
+                <!-- TIER 2: signaalgetrouwheid + laatst ontvangen -->
+<div class="lora-tier2">
+    <div class="lora-metric snr-block">
+        <div class="lora-metric-label">Signaalgetrouwheid</div>
+        <div class="lora-metric-value" id="lora-snr">-- dB</div>
+        <div class="snr-bar-container">
+            <div class="snr-bar-fill" id="snr-bar-fill" style="width: 0%"></div>
+        </div>
+    </div>
+    <div class="lora-metric">
+        <div class="lora-metric-label">Laatst ontvangen signaal</div>
+        <div class="lora-metric-value" id="lora-last-seen">--</div>
+    </div>
+</div>
 
                 <!-- TIER 3: administratieve info -->
                 <div class="lora-tier3">
