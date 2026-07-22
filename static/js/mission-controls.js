@@ -1,12 +1,11 @@
 /**
- * MISSION-CONTROLS — demo-missie besturing + noodknoppen + pre-flight status
+ * MISSION-CONTROLS — demo-missie besturing + noodknoppen
  *
  * Bevat:
  *  - startMission()        start de autonome demo-sequentie
  *  - missionStopHang()     LOITER: blijf hangen op huidige positie
  *  - missionRTL()          terug naar opstijgpunt en landen
  *  - missionLand()         direct dalen en landen op huidige plek
- *  - updatePreflightStatus(status)  vult GPS/sats/RTL-blok
  *  - registerMissionHandlers()      luistert naar mission_update van server
  *
  * VEILIGHEIDSMODEL (ter herinnering in de code):
@@ -18,17 +17,11 @@
  * Afhankelijkheden:
  *  - window.socket                 Socket.io client (gezet door main bootstrap)
  *  - DOM: #mission-status          voortgangstekst van de missie
- *  - DOM: #pf-gps / #pf-sats / #pf-rtl-alt   pre-flight statusvelden
  *  - reuse: setFeedback()          uit drone-controls.js (feedback-element)
  */
 
 // Minimale GPS-eisen — moeten matchen met MIN_SATELLITES in mission.py
 const MISSION_MIN_SATS = 8;
-
-// De RTL-hoogte lezen we niet live uit params (dat vereist een aparte
-// MAVLink-query); we tonen de waarde die we bij de Pixhawk hebben gezet.
-// Pas dit aan als je RTL_ALT wijzigt. In cm gedeeld door 100 = meters.
-const RTL_ALT_METERS = 4.0;   // matcht RTL_ALT=400 die we hebben gezet
 
 
 // ============================================
@@ -91,37 +84,6 @@ function missionLand() {
 
 
 // ============================================
-// PRE-FLIGHT STATUS
-// ============================================
-
-/**
- * Vul het pre-flight statusblok met live GPS-data. Wordt bij elke
- * status_update aangeroepen vanuit socket-handlers. Kleurt groen als
- * de drone klaar is om te starten, oranje/rood als niet.
- */
-function updatePreflightStatus(status) {
-    const gpsEl = document.getElementById('pf-gps');
-    const satsEl = document.getElementById('pf-sats');
-    const rtlEl = document.getElementById('pf-rtl-alt');
-    if (!gpsEl || !satsEl || !rtlEl) return;
-
-    const hasFix = status.gps_fix || false;
-    const sats = status.gps_satellites || 0;
-
-    // GPS-fix
-    gpsEl.textContent = hasFix ? '✅ 3D-fix' : '❌ geen fix';
-    gpsEl.style.color = hasFix ? '#4ade80' : '#f87171';
-
-    // Satellieten — groen bij genoeg, oranje bij te weinig
-    satsEl.textContent = sats;
-    satsEl.style.color = (sats >= MISSION_MIN_SATS) ? '#4ade80' : '#f5a623';
-
-    // RTL-hoogte (statisch, de waarde die we hebben gezet)
-    rtlEl.textContent = RTL_ALT_METERS.toFixed(1) + ' m';
-}
-
-
-// ============================================
 // SERVER-EVENTS
 // ============================================
 
@@ -167,5 +129,4 @@ window.startMission           = startMission;
 window.missionStopHang        = missionStopHang;
 window.missionRTL             = missionRTL;
 window.missionLand            = missionLand;
-window.updatePreflightStatus  = updatePreflightStatus;
 window.registerMissionHandlers = registerMissionHandlers;

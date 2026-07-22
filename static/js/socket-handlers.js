@@ -99,10 +99,8 @@ function dispatchStatusUpdate(data) {
     updateWifiNavbar(data);
     updateGpsNavbar(data);
 
-    // --- Missie pre-flight status (mission-controls.js) ---
     // Bewaar laatste status voor de client-side pre-flight check in startMission()
     window.lastKnownStatus = data;
-    if (window.updatePreflightStatus) window.updatePreflightStatus(data);
 }
 
 /**
