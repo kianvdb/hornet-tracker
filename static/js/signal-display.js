@@ -36,10 +36,10 @@ function rssiToPercent(rssi) {
  * < 1s    -> "0.X s geleden"
  * < 60s   -> "XX.X s geleden"
  * >= 60s  -> "XX min geleden" (operator wil weten wanneer link weg ging)
- * -1      -> "Nog geen packet" (sinds service start)
+ * -1      -> "Nog niets ontvangen" (sinds service start)
  */
 function formatPacketAge(seconds) {
-    if (seconds < 0) return 'Nog geen packet';
+    if (seconds < 0) return 'Nog niets ontvangen';
     if (seconds < 60) return seconds.toFixed(1) + ' s geleden';
     const mins = Math.floor(seconds / 60);
     return `${mins} min geleden`;
