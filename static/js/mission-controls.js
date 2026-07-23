@@ -23,10 +23,40 @@
 // Minimale GPS-eisen — moeten matchen met MIN_SATELLITES in mission.py
 const MISSION_MIN_SATS = 8;
 
+// Zoekhoogte-grenzen — moeten matchen met MIN/MAX_TAKEOFF_ALT_M in mission.py.
+// De server clampt opnieuw; deze waarden zijn UX, geen veiligheid.
+// De bovengrens komt uit de geofence (FENCE_ALT_MAX = 10 m) minus marge
+// voor overshoot en wind — zie de toelichting in mission.py.
+const MISSION_MIN_ALT_M     = 1.5;
+const MISSION_MAX_ALT_M     = 5.0;
+const MISSION_DEFAULT_ALT_M = 2.5;
+
 
 // ============================================
 // MISSIE-COMMANDO'S
 // ============================================
+
+/**
+ * Lees de ingestelde zoekhoogte uit het invoerveld en clamp hem op het
+ * toegestane bereik.
+ *
+ * Waarom clampen in de browser terwijl de server het ook doet: de
+ * min/max-attributen op een number-input zijn een hint voor de spinner,
+ * geen garantie — getypte waarden buiten het bereik komen er gewoon door.
+ * Deze clamp voorkomt dat we een onmogelijke hoogte versturen. De echte
+ * grens ligt in mission.py.
+ *
+ * @returns {number} hoogte in meters, altijd binnen [MIN, MAX]
+ */
+function readTakeoffAltitude() {
+    const el = document.getElementById('mission-alt');
+    if (!el) return MISSION_DEFAULT_ALT_M;
+
+    const val = parseFloat(el.value);
+    if (isNaN(val)) return MISSION_DEFAULT_ALT_M;
+
+    return Math.max(MISSION_MIN_ALT_M, Math.min(MISSION_MAX_ALT_M, val));
+}
 
 /**
  * Start de autonome demo-missie. We tonen meteen feedback; de echte
@@ -35,6 +65,9 @@ const MISSION_MIN_SATS = 8;
  * Veiligheid: we checken eerst de pre-flight status client-side zodat de
  * operator niet per ongeluk start zonder GPS-fix. De server checkt het
  * nog een keer (mission.py pre-flight), dus dit is alleen UX.
+ *
+ * De zoekhoogte komt uit het #mission-alt veld en wordt meegestuurd in
+ * de payload. Server-side wordt hij opnieuw geclampt.
  */
 function startMission() {
     // Client-side pre-flight waarschuwing (server checkt ook)
@@ -51,8 +84,10 @@ function startMission() {
         if (!doorgaan) return;
     }
 
-    setMissionStatus('🚀 Missie starten...', '#f5a623');
-    window.socket.emit('start_mission');
+    const hoogte = readTakeoffAltitude();
+
+    setMissionStatus(`🚀 Missie starten (${hoogte} m)...`, '#f5a623');
+    window.socket.emit('start_mission', { altitude: hoogte });
 }
 
 /**
@@ -129,4 +164,5 @@ window.startMission           = startMission;
 window.missionStopHang        = missionStopHang;
 window.missionRTL             = missionRTL;
 window.missionLand            = missionLand;
+window.readTakeoffAltitude    = readTakeoffAltitude;
 window.registerMissionHandlers = registerMissionHandlers;

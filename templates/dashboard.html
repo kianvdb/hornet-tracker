@@ -211,6 +211,15 @@
 
     <!-- ===== MISSIE-SECTIE ===== -->
 
+    <!-- Zoekhoogte: hoogte waarnaar de drone stijgt vóór het zoeken -->
+    <label class="mission-alt-field">
+        <span class="mission-alt-label">Zoekhoogte</span>
+        <input type="number" id="mission-alt"
+               min="1.5" max="5" step="0.5" value="2.5"
+               title="Maximaal 5 m — de geofence staat op 10 m">
+        <span class="mission-alt-unit">m</span>
+    </label>
+
     <!-- START MISSIE — groot en duidelijk -->
     <button class="btn btn-success" id="btn-start-mission"
             onclick="startMission()"

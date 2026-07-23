@@ -441,3 +441,46 @@
     text-align: center;
     font-size: 0.85em;
 }
+
+
+/* ============================================
+   ZOEKHOOGTE — instelbare opstijghoogte boven START MISSIE
+   ============================================ */
+
+.mission-alt-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #0f3460;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+}
+
+.mission-alt-label {
+    color: #aaa;
+    font-size: 0.9em;
+    flex: 1;
+}
+
+.mission-alt-field input {
+    width: 70px;
+    padding: 6px 8px;
+    background: #0a1530;
+    border: 1px solid #1a2540;
+    border-radius: 4px;
+    color: #eee;
+    font-family: 'Consolas', monospace;
+    font-size: 1.05em;
+    text-align: right;
+}
+
+.mission-alt-field input:focus {
+    outline: none;
+    border-color: #5e8bff;
+}
+
+.mission-alt-unit {
+    color: #aaa;
+    font-size: 0.9em;
+}
