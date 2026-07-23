@@ -13,7 +13,8 @@
  *
  * Afhankelijkheden:
  *  - window.socket            Socket.io client (gezet door main bootstrap)
- *  - DOM: #command-feedback   tekstveld voor status van laatste commando
+ *  - DOM: #mission-status     missie-statusbalk; command_result-meldingen
+ *                             landen hier sinds #command-feedback verdween
  *  - DOM: .mode-btn           knoppen die we highlighten op huidige mode
  */
 /**
@@ -80,18 +81,28 @@ function setMode(modeId) {
 // ============================================
 
 /**
- * Update tekst + kleur van het feedback element onder de knoppen.
- * Niet exposed op window — alleen intern gebruik.
+ * Toon een servermelding in de missie-statusbalk.
+ *
+ * Schreef eerder naar #command-feedback, dat met de vereenvoudiging van
+ * de besturing-card verdwenen is. De statusbalk naast de armed-badge is
+ * nu de enige plek waar meldingen verschijnen — client-side (via
+ * setMissionStatus in mission-controls.js) en server-side (hier) landen
+ * dus op hetzelfde element.
+ *
+ * Kleur volgt het succes-veld van command_result: groen bij geslaagd,
+ * rood bij geweigerd. Zonder expliciet succes-signaal blijft het neutraal.
+ *
+ * @param {string} text      de melding
+ * @param {boolean} [success] true = groen, false = rood, undefined = grijs
  */
-function setFeedback(text, color) {
-    // #command-feedback is uit de besturing-card verwijderd toen die tot
-    // twee knoppen werd teruggebracht. De arm/disarm/set_mode-flows (en de
-    // command_result-handler, die ook na START MISSIE vuurt) roepen dit nog
-    // aan, dus zonder guard crasht de handler op een ontbrekend element.
-    const fb = document.getElementById('command-feedback');
-    if (!fb) return;
-    fb.textContent = text;
-    fb.style.color = color;
+function setFeedback(text, success) {
+    const el = document.getElementById('mission-status');
+    if (!el) return;
+
+    el.textContent = text;
+    if (success === true)       el.style.color = '#4ade80';
+    else if (success === false) el.style.color = '#f87171';
+    else                        el.style.color = '#aaa';
 }
 
 /**
@@ -125,20 +136,17 @@ function updateModeButtons(currentMode) {
  */
 function registerCommandResultHandler() {
     window.socket.on('command_result', function(data) {
-        // Server reageerde — cancel pending timeout
+        // Server reageerde — cancel pending timeout (alleen relevant voor de
+        // console-only arm/disarm/set_mode-flows die de watchdog nog zetten)
         if (commandTimeoutHandle) {
             clearTimeout(commandTimeoutHandle);
             commandTimeoutHandle = null;
         }
 
-        if (data.success) {
-            setFeedback('✅ ' + data.message, '#4ade80');
-        } else {
-            setFeedback('❌ ' + data.message, '#f87171');
-        }
-        setTimeout(() => {
-            setFeedback("Klaar voor commando's", '#aaa');
-        }, 4000);
+        // Servermelding in de missie-statusbalk, gekleurd op succes. Geen
+        // auto-reset-timer: die zou een volgende mission_update-stap kunnen
+        // overschrijven — tijdens een vlucht wil je de actuele toestand zien.
+        setFeedback(data.message, data.success);
     });
 }
 /**

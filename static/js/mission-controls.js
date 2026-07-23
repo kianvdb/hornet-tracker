@@ -158,7 +158,14 @@ function registerMissionHandlers() {
 // UI HELPER
 // ============================================
 
-/** Update de missie-voortgangstekst met kleur. */
+/**
+ * Update de missie-voortgangstekst met kleur.
+ *
+ * Let op: #mission-status wordt ook beschreven door setFeedback() in
+ * drone-controls.js, dat servermeldingen (command_result) toont. Beide
+ * schrijven bewust naar hetzelfde element — de laatste melding wint,
+ * wat de actuele toestand is.
+ */
 function setMissionStatus(text, color) {
     const el = document.getElementById('mission-status');
     if (!el) return;
