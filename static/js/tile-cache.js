@@ -102,10 +102,13 @@ function renderTileStats(data) {
  * Vul lat/lon velden met de huidige drone-positie (vereist GPS-fix).
  */
 function useCurrentDronePos() {
-    const lat = parseFloat(document.getElementById('map-lat').textContent);
-    const lon = parseFloat(document.getElementById('map-lon').textContent);
+    // Drone-positie uit de gedeelde status i.p.v. de kaart-info-tekst: die
+    // lat/lon-velden zijn uit de UI verwijderd, de status-dict is de bron.
+    const status = window.lastKnownStatus || {};
+    const lat = status.gps_lat;
+    const lon = status.gps_lon;
 
-    if (!window.hasFix() || isNaN(lat) || isNaN(lon) || (lat === 0 && lon === 0)) {
+    if (!window.hasFix() || typeof lat !== 'number' || typeof lon !== 'number' || (lat === 0 && lon === 0)) {
         window.showToast('Geen GPS positie beschikbaar');
         return;
     }

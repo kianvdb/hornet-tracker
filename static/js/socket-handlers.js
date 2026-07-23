@@ -215,8 +215,6 @@ window.updateBars('nav-wifi-bars', bars);
  * Popover toont volledige details inclusief lat/lon.
  */
 function updateGpsNavbar(data) {
-     const satsEl = document.getElementById('map-sats');
-    if (satsEl) satsEl.textContent = data.gps_satellites || '--';
     const navStatus = document.getElementById('nav-gps-status');
     const navAlt    = document.getElementById('nav-gps-altitude');
     const navItem   = document.getElementById('nav-gps');

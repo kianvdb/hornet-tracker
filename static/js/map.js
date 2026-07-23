@@ -20,7 +20,7 @@
  * Afhankelijkheden:
  *  - Leaflet (vendored lokaal in static/vendor/leaflet/)
  *  - Tile cache via /tiles/<source>/{z}/{x}/{y}.png (Flask route)
- *  - HTML elementen: #map, #map-lat, #map-lon, #map-alt, #gps-waiting-badge
+ *  - HTML elementen: #map, #map-alt, #gps-waiting-badge
  */
 
 // ============================================
@@ -206,10 +206,9 @@ function updateMap(lat, lon, alt, heading) {
         trailLine.setLatLngs(trailCoords);
     }
 
-    // Info-regel onder de kaart
-    document.getElementById('map-lat').textContent = lat.toFixed(7);
-    document.getElementById('map-lon').textContent = lon.toFixed(7);
-    document.getElementById('map-alt').textContent = alt.toFixed(1);
+    // Hoogte onder de kaart
+    const altEl = document.getElementById('map-alt');
+    if (altEl) altEl.textContent = alt.toFixed(1);
 }
 
 /** Centreer kaart op huidige drone positie (alleen als er een fix is) */

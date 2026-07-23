@@ -174,11 +174,14 @@ async function initCoordLogFromServer() {
  * Vereist een actieve GPS-fix.
  */
 function logCoordinate() {
-    const lat = parseFloat(document.getElementById('map-lat').textContent);
-    const lon = parseFloat(document.getElementById('map-lon').textContent);
-    const alt = parseFloat(document.getElementById('map-alt').textContent);
+    // Drone-positie uit de gedeelde status i.p.v. de kaart-info-tekst: die
+    // lat/lon-velden zijn uit de UI verwijderd, de status-dict is de bron.
+    const status = window.lastKnownStatus || {};
+    const lat = status.gps_lat;
+    const lon = status.gps_lon;
+    const alt = status.altitude;
 
-    if (!window.hasFix() || isNaN(lat) || isNaN(lon) || (lat === 0 && lon === 0)) {
+    if (!window.hasFix() || typeof lat !== 'number' || typeof lon !== 'number' || (lat === 0 && lon === 0)) {
         window.showToast('Geen GPS positie beschikbaar');
         return;
     }
@@ -186,7 +189,7 @@ function logCoordinate() {
     openLogModal({
         lat: lat,
         lon: lon,
-        alt: isNaN(alt) ? 0 : alt,
+        alt: (typeof alt === 'number') ? alt : 0,
         source: 'drone',
         defaultStatus: 'wordt_onderzocht'
     });
