@@ -84,7 +84,12 @@ function setMode(modeId) {
  * Niet exposed op window — alleen intern gebruik.
  */
 function setFeedback(text, color) {
+    // #command-feedback is uit de besturing-card verwijderd toen die tot
+    // twee knoppen werd teruggebracht. De arm/disarm/set_mode-flows (en de
+    // command_result-handler, die ook na START MISSIE vuurt) roepen dit nog
+    // aan, dus zonder guard crasht de handler op een ontbrekend element.
     const fb = document.getElementById('command-feedback');
+    if (!fb) return;
     fb.textContent = text;
     fb.style.color = color;
 }

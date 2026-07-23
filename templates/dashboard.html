@@ -226,12 +226,11 @@
 <div class="card">
     <h2>🎮 Besturing</h2>
 
-    <!-- Armed status indicator -->
-    <div style="text-align:center; margin-bottom:15px;">
+    <!-- Statusregel: armed-badge links, missie-meldingen rechts -->
+    <div class="mission-statusbar">
         <span id="armed-status" class="status-badge disarmed">DISARMED</span>
+        <div id="mission-status" class="mission-status-text">Klaar om te starten</div>
     </div>
-
-    <!-- ===== MISSIE-SECTIE ===== -->
 
     <!-- Zoekhoogte: hoogte waarnaar de drone stijgt vóór het zoeken -->
     <label class="mission-alt-field">
@@ -242,54 +241,23 @@
         <span class="mission-alt-unit">m</span>
     </label>
 
-    <!-- START MISSIE — groot en duidelijk -->
-    <button class="btn btn-success" id="btn-start-mission"
-            onclick="startMission()"
-            style="width:100%; padding:14px; font-size:1.15em; margin-bottom:10px;">
-        🚀 START MISSIE
-    </button>
-
-    <!-- Missie-voortgang -->
-    <div id="mission-status" style="text-align:center; font-size:0.9em;
-         color:#aaa; min-height:20px; margin-bottom:12px;">
-        Klaar om te starten
-    </div>
-
-    <!-- ===== NOODKNOPPEN ===== -->
-    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:15px;">
-        <button class="btn btn-secondary" onclick="missionStopHang()"
-                style="padding:12px; font-size:0.95em;" title="Blijf hangen op huidige positie (LOITER)">
-            ✋ STOP<br>& HANG
+    <!--
+      Twee knoppen. LAND NU is bewust weggelaten: LOITER en RTL zitten
+      allebei op de SwC-switch van de zender, die tijdens de vlucht in
+      de hand van de operator ligt. Recht naar beneden dalen op de
+      huidige plek doe je met SwC-midden (LOITER) plus de gashendel.
+      De zender blijft primair; dit dashboard is de backup.
+    -->
+    <div class="mission-buttons">
+        <button class="btn btn-success" id="btn-start-mission"
+                onclick="startMission()">
+            🚀 START MISSIE
         </button>
-        <button class="btn btn-secondary" onclick="missionRTL()"
-                style="padding:12px; font-size:0.95em;" title="Terug naar opstijgpunt en landen">
-            🏠 RTL
+        <button class="btn btn-danger" id="btn-end-mission"
+                onclick="missionRTL()"
+                title="Beëindig de missie: terug naar het opstijgpunt en landen">
+            🏠 EINDE MISSIE
         </button>
-        <button class="btn btn-danger" onclick="missionLand()"
-                style="padding:12px; font-size:0.95em;" title="Direct dalen en landen op huidige plek">
-            🛬 LAND<br>NU
-        </button>
-    </div>
-
-    <!-- ===== HANDMATIG (op de grond) ===== -->
-    <!-- ===== HANDMATIG (op de grond) ===== -->
-<details style="margin-bottom:12px;">
-    <summary style="cursor:pointer; color:#aaa; font-size:0.9em;">
-        Handmatig armen (grondtest)
-    </summary>
-    <div style="display:flex;gap:10px;margin:12px 0;">
-        <button class="btn btn-success" id="btn-arm" onclick="armDrone()"
-                style="flex:1;padding:10px;">🔓 ARM</button>
-        <button class="btn btn-danger" id="btn-disarm" onclick="disarmDrone()"
-                style="flex:1;padding:10px;">🔒 DISARM</button>
-    </div>
-    <div style="font-size:0.8em; color:#888; margin-top:4px;">
-        Alleen voor grondtest met props eraf. Nooit ARM met props tenzij je gaat vliegen.
-    </div>
-</details>
-
-    <div id="command-feedback" style="font-size:0.85em;color:#aaa;min-height:20px;margin-top:8px;">
-        Klaar voor commando's
     </div>
 </div>
 

@@ -2,15 +2,15 @@
  * MISSION-CONTROLS — demo-missie besturing + noodknoppen
  *
  * Bevat:
- *  - startMission()        start de autonome demo-sequentie
- *  - missionStopHang()     LOITER: blijf hangen op huidige positie
- *  - missionRTL()          terug naar opstijgpunt en landen
- *  - missionLand()         direct dalen en landen op huidige plek
+ *  - startMission()        start de autonome zoeksequentie
+ *  - missionRTL()          EINDE MISSIE: terug naar opstijgpunt en landen
+ *  - missionStopHang()     LOITER (niet aan een knop gekoppeld, zie hieronder)
+ *  - missionLand()         LAND (niet aan een knop gekoppeld, zie hieronder)
  *  - registerMissionHandlers()      luistert naar mission_update van server
  *
  * VEILIGHEIDSMODEL (ter herinnering in de code):
- *  - De zender is primair. Deze knoppen zijn backup, behalve LAND NU
- *    (die zit niet op de switch).
+ *  - De zender is primair. EINDE MISSIE (RTL) is een backup van de
+ *    SwC-switch. LAND en LOITER zitten alleen op de zender.
  *  - Disarmen gebeurt nooit vanuit de lucht. Elke landing (missie/RTL/LAND)
  *    leidt tot auto-disarm door ArduCopter zelf.
  *
@@ -91,8 +91,12 @@ function startMission() {
 }
 
 /**
- * STOP & HANG — zet de drone in LOITER. Hij blijft hangen op zijn huidige
- * positie en hoogte tot de operator een volgende stap kiest.
+ * STOP & HANG — zet de drone in LOITER.
+ *
+ * Niet meer aan een knop gekoppeld sinds de besturing-card tot twee
+ * knoppen is teruggebracht: LOITER zit op de SwC-switch van de zender.
+ * De functie en de server-handler blijven bestaan zodat de actie via
+ * de console beschikbaar is tijdens tests.
  */
 function missionStopHang() {
     setMissionStatus('✋ STOP & HANG (LOITER)...', '#f5a623');
@@ -109,8 +113,12 @@ function missionRTL() {
 }
 
 /**
- * LAND NU — direct dalen en landen op huidige plek. De enige nood-actie
- * die niet op de zender-switch zit.
+ * LAND NU — direct dalen en landen op huidige plek.
+ *
+ * Niet meer aan een knop gekoppeld sinds de besturing-card tot twee
+ * knoppen is teruggebracht: LAND zit op de SwC-switch van de zender.
+ * De functie en de server-handler blijven bestaan zodat de actie via
+ * de console beschikbaar is tijdens tests.
  */
 function missionLand() {
     setMissionStatus('🛬 LAND NU — dalen...', '#f5a623');
