@@ -82,3 +82,29 @@
 .tab-panel.active {
     display: flex;
 }
+
+
+/* De linkerkolom vult de vensterhoogte zodat panelen erbinnen kunnen
+   schalen in plaats van door te lopen. Navbar (~64px) en padding zijn
+   van de viewport-hoogte afgetrokken. */
+.dashboard-col-left {
+    height: calc(100dvh - 96px);
+}
+
+.tab-panels {
+    flex: 1;
+    min-height: 0;      /* zonder dit weigert een flex-child te krimpen */
+}
+
+.tab-panel.active {
+    height: 100%;
+}
+
+/* Log-card vult het paneel; alleen de lijst erbinnen scrollt, de
+   header met telling en wis-knop blijft staan. */
+#panel-log .card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}

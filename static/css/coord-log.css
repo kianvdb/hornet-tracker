@@ -4,7 +4,8 @@
 
 /* Scrollbare container voor logged entries */
 .coord-log {
-    max-height: 400px;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     margin-top: 10px;
 }
