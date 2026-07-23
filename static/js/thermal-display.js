@@ -269,6 +269,16 @@ function handleThermalFrame(payload) {
         updateThermalButtons();
     }
 
+    // Alleen renderen wanneer het thermisch paneel open staat. De backend
+    // blijft frames sturen (thermal_loop kent de UI-staat niet); we slaan
+    // hier het dure werk over — off-screen canvas, ImageData, 768 pixels.
+    // De baseline-state hierboven blijft wel bijgewerkt, zodat de knoppen
+    // meteen kloppen zodra de operator naar de tab wisselt.
+    if (typeof window.getActiveTab === 'function' &&
+        window.getActiveTab() !== 'thermal') {
+        return;
+    }
+
     renderThermalFrame(payload);
     updateThermalStats(payload.min, payload.max, payload.avg, payload.fps);
 }
