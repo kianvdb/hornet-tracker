@@ -20,6 +20,8 @@
     margin: 0 auto;
     padding: 0 16px;
     align-items: start;
+    height: calc(100dvh - 96px);   /* nieuw */
+    overflow: hidden;              /* nieuw */
 }
 
 .dashboard-col {
@@ -106,5 +108,25 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
+}
+
+
+/* De kaart-card vult de rechterkolom; #map groeit mee in plaats van
+   een vaste hoogte te houden. */
+.dashboard-col-right {
+    height: 100%;
+    min-height: 0;
+}
+
+.dashboard-col-right .map-card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.dashboard-col-right #map {
+    flex: 1;
     min-height: 0;
 }

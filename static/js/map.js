@@ -151,6 +151,19 @@ function initMap() {
 
     console.log('[map] Geinitialiseerd op fallback locatie (Brussel)');
 
+    // Leaflet cachet de containerafmetingen bij init. De kaart groeit
+    // via flex mee met het venster, dus na een resize moet Leaflet
+    // opnieuw meten — anders blijven tiles op de oude maat staan.
+    window.addEventListener('resize', function() {
+        if (map) map.invalidateSize();
+    });
+
+    // Ook één keer na de eerste layout-pass, omdat #map bij init nog
+    // geen definitieve hoogte heeft (flex rekent daarna pas).
+    setTimeout(function() {
+        if (map) map.invalidateSize();
+    }, 100);
+
 }
 
 /**
