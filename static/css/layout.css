@@ -34,3 +34,51 @@
         grid-template-columns: 1fr;
     }
 }
+
+
+/* ============================================
+   TABS — wisselende panelen in de linkerkolom
+   ============================================ */
+
+.tab-bar {
+    display: flex;
+    gap: 6px;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 6px;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 10px 8px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #aaa;
+    font-size: 0.95em;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+
+.tab-btn:hover {
+    background: #0f3460;
+    color: #eee;
+}
+
+.tab-btn.active {
+    background: #0f3460;
+    color: #f5a623;
+    font-weight: bold;
+}
+
+.tab-panel {
+    display: none;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.tab-panel.active {
+    display: flex;
+}

@@ -156,8 +156,30 @@
     <!-- DASHBOARD LAYOUT — 2 koloms voor no-scroll viewport -->
     <div class="dashboard-layout">
 
-        <!-- LINKER KOLOM: info & controls -->
-        <div class="dashboard-col">
+        <!-- LINKER KOLOM: wisselende panelen via tabs -->
+        <div class="dashboard-col dashboard-col-left">
+
+            <div class="tab-bar" role="tablist">
+                <button class="tab-btn active" id="tab-veld"
+                        onclick="switchTab('veld')"
+                        role="tab" aria-selected="true">
+                    🎮 Veld
+                </button>
+                <button class="tab-btn" id="tab-thermal"
+                        onclick="switchTab('thermal')"
+                        role="tab" aria-selected="false">
+                    🌡️ Thermisch
+                </button>
+                <button class="tab-btn" id="tab-log"
+                        onclick="switchTab('log')"
+                        role="tab" aria-selected="false">
+                    📌 Log
+                </button>
+            </div>
+
+            <div class="tab-panels">
+
+                <div class="tab-panel active" id="panel-veld" role="tabpanel">
 
             <div class="card">
                 <h2>📻 Hoornaarsignaal</h2>
@@ -271,6 +293,10 @@
     </div>
 </div>
 
+                </div><!-- /panel-veld -->
+
+                <div class="tab-panel" id="panel-thermal" role="tabpanel">
+
           <div class="card">
                 <div class="thermal-header">
                     <h2>🌡️ Thermisch Beeld</h2>
@@ -340,9 +366,26 @@
                 </div>
             </div>
 
+                </div><!-- /panel-thermal -->
+
+                <div class="tab-panel" id="panel-log" role="tabpanel">
+                    <div class="card">
+                        <h2>📌 Coördinaat Log</h2>
+                        <div class="log-header">
+                            <span class="log-count" id="log-count">0 punten</span>
+                            <button class="btn btn-small btn-danger" onclick="clearLog()">Wissen</button>
+                        </div>
+                        <div class="coord-log" id="coord-log">
+                            <div class="coord-empty">Klik "📌 Log Positie" om coördinaten op te slaan</div>
+                        </div>
+                    </div>
+                </div><!-- /panel-log -->
+
+            </div><!-- /tab-panels -->
+
         </div>
 
-        <!-- RECHTER KOLOM: visualisatie -->
+        <!-- RECHTER KOLOM: kaart, altijd zichtbaar -->
         <div class="dashboard-col">
 
             <div class="map-card">
@@ -366,17 +409,6 @@
                     <button class="btn btn-small btn-secondary" onclick="toggleTrail()">🔄 Trail aan/uit</button>
                     <button class="btn btn-small btn-secondary" onclick="centerMap()">🎯 Centreer</button>
                     <button class="btn btn-small btn-secondary" onclick="exportLog()">📊 Export Excel</button>
-                </div>
-            </div>
-
-            <div class="map-card">
-                <h2>📌 Coördinaat Log</h2>
-                <div class="log-header">
-                    <span class="log-count" id="log-count">0 punten</span>
-                    <button class="btn btn-small btn-danger" onclick="clearLog()">Wissen</button>
-                </div>
-                <div class="coord-log" id="coord-log">
-                    <div class="coord-empty">Klik "📌 Log Positie" om coördinaten op te slaan</div>
                 </div>
             </div>
 
@@ -652,7 +684,8 @@
     <script src="{{ url_for('static', filename='js/modals.js') }}"></script>
     <script src="{{ url_for('static', filename='js/nominatim.js') }}"></script>
     <script src="{{ url_for('static', filename='js/tile-cache.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>    
+    <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tabs.js') }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
