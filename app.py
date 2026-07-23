@@ -1994,14 +1994,23 @@ def handle_set_mode(data):
 # ============================================
 
 @socketio.on('start_mission')
-def handle_start_mission():
+def handle_start_mission(data=None):
     """
-    START MISSIE-knop. Start de voorgeprogrammeerde demo-sequentie in een
-    aparte thread. De missie-module leest de gedeelde 'status' dict voor
-    telemetrie en gebruikt get_mav_connection() voor commando's.
+    START MISSIE-knop. Start de zoeksequentie in een aparte thread.
+
+    Frontend stuurt {'altitude': <float>} mee — de zoekhoogte uit het
+    dashboard-invoerveld. De hoogte wordt server-side opnieuw geclampt
+    in mission.py; de browser-clamp is alleen UX.
+
+    data=None als default zodat een emit zonder payload (oude client,
+    of een handmatige emit vanuit de console) niet crasht.
     """
-    print('START MISSIE ontvangen van frontend')
-    success, message = mission.start_mission(status, get_mav_connection, socketio.emit)
+    payload = data or {}
+    altitude = payload.get('altitude')
+    print(f'START MISSIE ontvangen van frontend (hoogte {altitude} m)')
+    success, message = mission.start_mission(
+        status, get_mav_connection, socketio.emit, altitude
+    )
     socketio.emit('command_result', {'success': success, 'message': message})
 
 

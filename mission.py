@@ -5,8 +5,11 @@ mission.py — Autonome demo-missie voor VespaTrack
 Een voorgeprogrammeerde, sensor-onafhankelijke vluchtsequentie die het
 autonome vliegen zelf bewijst voordat er op signalen gereageerd wordt:
 
-    ARM -> GUIDED -> stijg 1.5m -> hover -> 360° draai -> hover
-        -> 1.5m vooruit -> hover -> land (auto-disarm)
+    ARM -> GUIDED -> stijg naar zoekhoogte -> hover -> 360° draai
+        -> hover -> 1.5m vooruit -> hover -> land (auto-disarm)
+
+De zoekhoogte is instelbaar vanuit het dashboard (1,5–5 m, default 2,5 m)
+en wordt server-side geclampt tegen de geofence.
 
 VEILIGHEIDSMODEL (belangrijk!):
   - De zender heeft ALTIJD voorrang. Zet de operator de SwC-switch naar
@@ -39,7 +42,27 @@ import threading
 # (WPNAV_SPEED_UP=50, WPNAV_SPEED=150, etc). De hoogte/afstand hier
 # bepalen de vorm van de missie; de snelheden zitten in de Pixhawk.
 
-TAKEOFF_ALT_M   = 1.5    # opstijghoogte in meters
+# ============================================
+# HOOGTEGRENZEN
+# ============================================
+# De harde bovengrens is de geofence op de Pixhawk (FENCE_ALT_MAX = 10 m,
+# FENCE_ENABLE = 1, FENCE_TYPE = 1, FENCE_ACTION = 3 -> SmartRTL).
+# Daar houden we bewust ruime marge onder: in het veld schommelde de drone
+# ~1 m boven het setpoint, en bij wind kan dat meer zijn. 5 m zoekhoogte
+# laat dus minstens 4 m over voordat de fence ingrijpt.
+#
+# 5 m valt samen met RTL_ALT (500 cm). Zit de drone daarboven door
+# overshoot, dan vliegt een RTL horizontaal terug op de huidige hoogte
+# in plaats van eerst te klimmen. Op een open demoveld is dat veilig.
+#
+# Deze waarden moeten matchen met MISSION_MIN/MAX/DEFAULT_ALT_M in
+# static/js/mission-controls.js.
+FENCE_ALT_MAX_M       = 10.0   # spiegelt de Pixhawk-parameter
+ALT_SAFETY_MARGIN_M   = 5.0    # marge voor overshoot en wind
+MIN_TAKEOFF_ALT_M     = 1.5
+MAX_TAKEOFF_ALT_M     = FENCE_ALT_MAX_M - ALT_SAFETY_MARGIN_M   # = 5.0
+DEFAULT_TAKEOFF_ALT_M = 2.5
+
 FORWARD_DIST_M  = 2.0    # vooruit-afstand in meters
 STEP_PAUSE_S    = 3.0    # pauze tussen stappen (rustig, volgbaar)
 YAW_DEGREES     = 360    # volledige draai
@@ -50,8 +73,12 @@ MIN_SATELLITES  = 8      # minimaal aantal GPS-satellieten
 REQUIRE_3D_FIX  = True   # 3D-fix vereist
 
 # Hoe lang wachten tot de drone zijn doelhoogte bereikt heeft (veiligheid:
-# nooit oneindig wachten als er iets misgaat)
-TAKEOFF_TIMEOUT_S = 15
+# nooit oneindig wachten als er iets misgaat).
+#
+# Gekalibreerd op de maximale zoekhoogte van 5 m bij WPNAV_SPEED_UP = 50
+# (50 cm/s): ~10 s klimmen plus armtijd en marge. Verandert WPNAV_SPEED_UP,
+# dan moet deze waarde mee.
+TAKEOFF_TIMEOUT_S = 25
 
 
 # ============================================
@@ -87,6 +114,25 @@ def get_mission_state():
 # ============================================
 # HULPFUNCTIES
 # ============================================
+
+def _clamp_altitude(value):
+    """
+    Beperk de aangeleverde zoekhoogte tot het toegestane bereik.
+
+    Herhaalt bewust de clamp die de browser al doet: een client kan
+    altijd iets anders sturen dan het invoerveld toestaat. Dit is de
+    grens die telt.
+
+    Bij None, een lege waarde of onparsebare invoer valt hij terug op
+    DEFAULT_TAKEOFF_ALT_M in plaats van te falen — een missie die op
+    2,5 m start is beter dan een crash in de handler.
+    """
+    try:
+        alt = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_TAKEOFF_ALT_M
+    return max(MIN_TAKEOFF_ALT_M, min(MAX_TAKEOFF_ALT_M, alt))
+
 
 def _pilot_has_taken_over(status):
     """
@@ -216,7 +262,7 @@ def _cmd_land(get_mav, mavutil):
 # DE MISSIE-SEQUENTIE
 # ============================================
 
-def _run_mission(status, get_mav, emit_fn):
+def _run_mission(status, get_mav, emit_fn, takeoff_alt_m):
     """
     De volledige demo-sequentie. Draait in een aparte thread.
 
@@ -225,6 +271,7 @@ def _run_mission(status, get_mav, emit_fn):
       get_mav : functie die de huidige MAVLink-connectie teruggeeft (of None)
       emit_fn : functie om een bericht naar het dashboard te sturen
                 (bijv. socketio.emit) — signatuur emit_fn(event, data)
+      takeoff_alt_m : zoekhoogte in meters, al geclampt door start_mission()
 
     Het veiligheidsmodel loopt door de HELE functie: na elke stap en tijdens
     elke wachttijd checken we of de piloot heeft overgenomen. Zo ja: stoppen.
@@ -287,9 +334,9 @@ def _run_mission(status, get_mav, emit_fn):
         return
 
     # ---- TAKEOFF ----
-    _set_state('takeoff', f'Opstijgen naar {TAKEOFF_ALT_M} m...')
+    _set_state('takeoff', f'Opstijgen naar {takeoff_alt_m} m...')
     emit_fn('mission_update', get_mission_state())
-    _cmd_takeoff(get_mav, mavutil, TAKEOFF_ALT_M)
+    _cmd_takeoff(get_mav, mavutil, takeoff_alt_m)
 
     # Wacht tot de doelhoogte bereikt is (of timeout), met overname-check
     deadline = time.time() + TAKEOFF_TIMEOUT_S
@@ -297,7 +344,7 @@ def _run_mission(status, get_mav, emit_fn):
         if abort_if_pilot():
             return
         alt = status.get('altitude', 0)
-        if alt >= TAKEOFF_ALT_M * 0.95:   # 95% = hoog genoeg
+        if alt >= takeoff_alt_m * 0.95:   # 95% = hoog genoeg
             break
         time.sleep(0.3)
 
@@ -348,10 +395,14 @@ def _run_mission(status, get_mav, emit_fn):
 # PUBLIEKE API (aangeroepen vanuit app.py)
 # ============================================
 
-def start_mission(status, get_mav, emit_fn):
+def start_mission(status, get_mav, emit_fn, takeoff_alt_m=None):
     """
-    Start de demo-missie in een aparte thread. Doet niets als er al een
+    Start de zoekmissie in een aparte thread. Doet niets als er al een
     missie loopt (voorkomt dubbele starts).
+
+    takeoff_alt_m komt uit het dashboard en wordt hier geclampt vóór de
+    thread start — zo krijgt _run_mission altijd een geldige waarde en
+    hoeft die functie zelf niet te valideren.
 
     Returns (success: bool, message: str) voor directe feedback.
     """
@@ -361,11 +412,13 @@ def start_mission(status, get_mav, emit_fn):
         if mission_state['active']:
             return False, 'Er loopt al een missie'
 
+    alt = _clamp_altitude(takeoff_alt_m)
+
     _mission_thread = threading.Thread(
         target=_run_mission,
-        args=(status, get_mav, emit_fn),
+        args=(status, get_mav, emit_fn, alt),
         daemon=True,
-        name='demo-mission'
+        name='zoek-missie'
     )
     _mission_thread.start()
-    return True, 'Missie gestart'
+    return True, f'Missie gestart (zoekhoogte {alt} m)'
