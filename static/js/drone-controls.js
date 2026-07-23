@@ -161,8 +161,10 @@ function armCommandTimeout() {
     commandTimeoutHandle = setTimeout(() => {
         setFeedback('❌ Geen reactie van Pi/Pixhawk', '#f87171');
         commandTimeoutHandle = null;
-        // Reset na 4s zoals normale command_result feedback
-        setTimeout(() => setFeedback("Klaar voor commando's", '#aaa'), 4000);
+        // Reset uitgeschakeld: #mission-status is gedeeld met de missievoortgang
+        // en een timer die daaroverheen schrijft zou een missiestap kunnen
+        // maskeren. Verdwijnt met de manual-arm-cleanup.
+        // setTimeout(() => setFeedback("Klaar voor commando's", '#aaa'), 4000);
     }, COMMAND_TIMEOUT_MS);
 }
 // Expose op window

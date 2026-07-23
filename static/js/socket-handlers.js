@@ -114,8 +114,19 @@ function dispatchStatusUpdate(data) {
 function updateDroneStatusCard(data) {
     const armedEl = document.getElementById('armed-status');
     if (armedEl) {
-        armedEl.textContent = data.armed ? 'ARMED' : 'DISARMED';
-        armedEl.className   = 'status-badge ' + (data.armed ? 'armed' : 'disarmed');
+        // "Armed/disarmed" is vliegtuigjargon dat een verdelger niet kent, en de
+        // Nederlandse vertaling ("gewapend") is misleidend op een zoekdrone. De
+        // badge zegt nu wat er fysiek aan de hand is: draaien de motoren of niet.
+        //
+        // De klassenamen armed/disarmed blijven de MAVLink-toestand spiegelen;
+        // alleen de kleuren erachter zijn omgedraaid (zie cards.css).
+        if (data.armed) {
+            armedEl.textContent = 'MOTOREN AAN';
+            armedEl.className = 'status-badge armed';
+        } else {
+            armedEl.textContent = 'MOTOREN UIT';
+            armedEl.className = 'status-badge disarmed';
+        }
     }
 }
 

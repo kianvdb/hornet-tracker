@@ -46,8 +46,12 @@
     text-align: center;
 }
 
-.armed    { background: #dc2626 !important; }
-.disarmed { background: #4ade80; }
+/* Status badge voor de motorstatus (Besturing card).
+   Kleuren volgen de operator-logica, niet de vlieg-conventie: groen =
+   de drone doet wat hij moet doen (motoren draaien tijdens de missie),
+   rood = motoren uit. De klassenamen spiegelen nog de MAVLink-toestand. */
+.armed    { background: #4ade80; color: #1a1a2e; }
+.disarmed { background: #dc2626; color: #fff; }
 
 /* ============================================
    SIGNAAL BALKJES
