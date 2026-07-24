@@ -144,6 +144,10 @@
         <button class="navbar-btn" onclick="openTileCacheModal()" title="Offline kaart-tiles beheren">
                 🗺️ Offline kaart
             </button>
+            <button class="navbar-btn" onclick="showMetingModal()"
+                    title="360-graden stralingsdiagram meten (ontwikkelgereedschap)">
+                📊 Meting
+            </button>
             <button class="navbar-btn" onclick="showRebootModal()" title="Herstart Pi">
                 🔄 Herstart
             </button>
@@ -402,6 +406,29 @@
         </div>
     </div>
 
+    <!-- Stralingsdiagram-meting: ontwikkelgereedschap, geen veldfunctie -->
+    <div class="modal" id="meting-modal">
+        <div class="modal-content">
+            <h3>📊 Stralingsdiagram meten</h3>
+            <p style="text-align:left; color:#aaa;">
+                De drone stijgt naar 2 m, draait 36 stappen van 10°, klimt
+                naar 4 m, draait opnieuw, en landt. Duur ongeveer 8 minuten.
+            </p>
+            <p style="text-align:left; color:#aaa;">
+                Zorg dat de beacon op 20 m staat en dat de zender in de hand
+                is — de meting stopt zodra je met de SwC-switch overneemt.
+            </p>
+            <p style="text-align:left; color:#f5a623; font-size:0.9em;">
+                ⚠️ Dit is ontwikkelgereedschap voor het ijken van het
+                zoekalgoritme, geen functie voor de verdelger.
+            </p>
+            <div class="btn-group" style="justify-content: center;">
+                <button class="btn btn-secondary" onclick="hideModals()">Annuleren</button>
+                <button class="btn btn-success" onclick="startMeting()">Start meting</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Log-entry modal (verschijnt bij Log Positie of map-click) -->
     <div class="modal" id="log-modal">
         <div class="modal-content" style="min-width: 420px; text-align: left;">
@@ -654,6 +681,7 @@
     <script src="{{ url_for('static', filename='js/tile-cache.js') }}"></script>
     <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>
     <script src="{{ url_for('static', filename='js/tabs.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/pattern-controls.js') }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

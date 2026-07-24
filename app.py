@@ -19,6 +19,7 @@ Kalibratie van beacon v2 (zie beacon.ino):
   - SF9, BW 125 kHz, 433 MHz, ~200ms time-on-air, elke 500ms
 """
 import mission  # onze demo-missie module
+import pattern  # stralingsdiagram-meting (ontwikkelgereedschap)
 from flask import Flask, render_template, jsonify, request, send_file
 import io
 import json
@@ -2014,6 +2015,22 @@ def handle_start_mission(data=None):
     success, message = mission.start_mission(
         status, get_mav_connection, socketio.emit, altitude
     )
+    socketio.emit('command_result', {'success': success, 'message': message})
+
+
+@socketio.on('start_meting')
+def handle_start_meting(data=None):
+    """
+    Start de stralingsdiagram-meting (ontwikkelgereedschap).
+
+    data=None als default zodat een emit zonder payload niet crasht. De
+    hoogtes worden in pattern.py geclampt; hier geen validatie dubbelop.
+    """
+    payload = data or {}
+    hoogtes = payload.get('hoogtes', [2.0, 4.0])
+    print(f'START METING ontvangen van frontend (hoogtes {hoogtes})')
+    success, message = pattern.start_meting(
+        status, get_mav_connection, socketio.emit, hoogtes)
     socketio.emit('command_result', {'success': success, 'message': message})
 
 

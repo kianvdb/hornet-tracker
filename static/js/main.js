@@ -41,6 +41,7 @@
         window.registerCommandResultHandler();        // arm/disarm/mode feedback
         window.registerBaselineStatusHandler();       // baseline reset knop state
         window.registerMissionHandlers();             // missie voortgang (mission_update)
+        window.registerMetingHandlers();              // stralingsdiagram (meting_update)
         window.registerPopoverOutsideClick();
 
         console.log('[main] Klaar.');
