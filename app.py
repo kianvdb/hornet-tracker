@@ -801,7 +801,7 @@ class LoRaSource(SignalSource):
                 crc_error = flags.get('crc_error', 0)
                 payload_raw = self._lora.read_payload(nocheck=True)
                 rssi = self._lora.get_pkt_rssi_value()
-                snr_value = self._lora.get_pkt_snr_value()
+                snr_raw = self._lora.get_register(0x19)   # RegPktSnrValue, ruwe byte
 
                 # Clear flags + restart RX voor volgende packet
                 # Wis alle relevante IRQ flags na packet-handling
@@ -837,12 +837,15 @@ class LoRaSource(SignalSource):
             except ValueError:
                 continue
 
-            # pyLoRa's get_pkt_snr_value() past de kwart-dB-schaling al toe; de
-            # waarde is dus geen ruwe registerbyte. De oude heuristiek
-            # (`snr_raw if abs(...) <= 20 else snr_raw / 4.0`) deelde in het
-            # grote bereik een tweede keer en was daarmee fout.
-            # Zie SX127x/LoRa.py -> get_pkt_snr_value().
-            snr_db = snr_value
+            # SNR uit RegPktSnrValue (0x19): één signed byte in kwart-dB.
+            # We lezen het register rechtstreeks via get_register() en doen de
+            # two's-complement-conversie zelf. pyLoRa's get_pkt_snr_value()
+            # rekent (256 - v) / 4 — dat is monotoon in de VERKEERDE richting:
+            # in het positieve-SNR-bereik (byte 0..127) geeft een hogere echte
+            # SNR een lagere waarde, waardoor een piek-zoeker van de beacon af
+            # zou sturen. Correct: echte dB = signed(byte) / 4.
+            # Zelfde thread als de RX-reads hierboven, dus geen SPI-conflict.
+            snr_db = (snr_raw - 256 if snr_raw > 127 else snr_raw) / 4.0
 
             # Update state — alleen primitieve types, atomic in CPython
             self._last_rssi = float(rssi)

@@ -3,13 +3,29 @@
 mission.py — Autonome demo-missie voor VespaTrack
 
 Een voorgeprogrammeerde, sensor-onafhankelijke vluchtsequentie die het
-autonome vliegen zelf bewijst voordat er op signalen gereageerd wordt:
+autonome vliegen zelf bewijst voordat er op signalen gereageerd wordt.
 
-    ARM -> GUIDED -> stijg naar zoekhoogte -> hover -> 360° draai
-        -> hover -> 1.5m vooruit -> hover -> land (auto-disarm)
+De missie kan vanuit twee situaties starten en detecteert zelf welke;
+één knop, geen keuzemenu:
+
+    vanaf de grond : GUIDED -> ARM -> stijg naar zoekhoogte -+
+    vanuit de lucht: GUIDED (alleen overnemen) --------------+
+                                                             |
+        +----------------------------------------------------+
+        -> hover -> 360° draai -> hover -> 1.5m vooruit
+        -> hover -> land (auto-disarm)
+
+"Vanuit de lucht" betekent dat de operator handmatig is opgestegen en
+positie gekozen heeft; de drone zoekt dan op de hoogte waar hij hangt.
+Het onderscheid gaat via armed + altitude > MIN_AIRBORNE_ALT_M.
 
 De zoekhoogte is instelbaar vanuit het dashboard (1,5–5 m, default 2,5 m)
-en wordt server-side geclampt tegen de geofence.
+en wordt server-side geclampt tegen de geofence. Hij geldt alleen voor de
+start vanaf de grond — hangt de drone al, dan is hij niet van toepassing.
+
+De pre-flight GPS-check geldt in BEIDE gevallen: hij kost niets en vangt
+het geval waarin de fix wegvalt tussen handmatig opstijgen en het
+drukken op START.
 
 VEILIGHEIDSMODEL (belangrijk!):
   - De zender heeft ALTIJD voorrang. Zet de operator de SwC-switch naar
@@ -71,6 +87,16 @@ YAW_RATE_DPS    = 20     # draaisnelheid in graden/seconde
 # Pre-flight eisen — hieronder start de missie niet
 MIN_SATELLITES  = 8      # minimaal aantal GPS-satellieten
 REQUIRE_3D_FIX  = True   # 3D-fix vereist
+
+# Drempel om "in de lucht" te onderscheiden van GPS-hoogteruis op de
+# grond. De drone rapporteerde op de grond waarden tot ~0,6 m.
+#
+# Gelijk aan MIN_TAKEOFF_ALT_M: onder die hoogte hangt de drone nooit
+# bewust, dus alles daaronder is grond. Op 1,0 m bestond nog een grijze
+# zone waarin de schommelende hoogtemeting de grondtak kon kiezen terwijl
+# de drone al hing — die zou dan een takeoff commanderen en een
+# onverwachte klim geven. Met 1,5 m is die zone weg.
+MIN_AIRBORNE_ALT_M = 1.5
 
 # Hoe lang wachten tot de drone zijn doelhoogte bereikt heeft (veiligheid:
 # nooit oneindig wachten als er iets misgaat).
@@ -313,43 +339,69 @@ def _run_mission(status, get_mav, emit_fn, takeoff_alt_m):
         emit_fn('mission_update', get_mission_state())
         return
 
-    # ---- GUIDED ----
-    _set_state('guided', 'GUIDED-mode instellen...')
-    emit_fn('mission_update', get_mission_state())
-    _cmd_set_mode_guided(get_mav, mavutil)
-    if not _wait_with_pilot_check(2, status, get_mav):
-        abort_if_pilot(); return
+    # Hangt de drone al? Dan heeft de operator handmatig opgestegen en
+    # positie gekozen; wij nemen alleen over en zoeken op de hoogte waar
+    # hij staat. Armen en opstijgen zou in dat geval betekenisloos of
+    # gevaarlijk zijn (een TAKEOFF-commando in de lucht laat de drone
+    # opnieuw klimmen naar de doelhoogte).
+    al_in_de_lucht = (status.get('armed', False)
+                      and status.get('altitude', 0) > MIN_AIRBORNE_ALT_M)
 
-    # ---- ARM ----
-    _set_state('arm', 'Armen...')
-    emit_fn('mission_update', get_mission_state())
-    _cmd_arm(get_mav, mavutil)
-    if not _wait_with_pilot_check(3, status, get_mav):
-        abort_if_pilot(); return
-
-    # Controleer of we echt gearmd zijn
-    if not status.get('armed', False):
-        _set_state('fout', 'Armen mislukt (check RC aan + GPS) — missie afgebroken', active=False)
+    if al_in_de_lucht:
+        # ---- OVERNEMEN IN DE LUCHT ----
+        hoogte = round(status.get('altitude', 0), 1)
+        _set_state('guided', f'Overnemen op {hoogte} m...')
         emit_fn('mission_update', get_mission_state())
-        return
+        _cmd_set_mode_guided(get_mav, mavutil)
+        if not _wait_with_pilot_check(2, status, get_mav):
+            abort_if_pilot(); return
 
-    # ---- TAKEOFF ----
-    _set_state('takeoff', f'Opstijgen naar {takeoff_alt_m} m...')
-    emit_fn('mission_update', get_mission_state())
-    _cmd_takeoff(get_mav, mavutil, takeoff_alt_m)
+        # Laten uitzweven na de mode-switch: LOITER en GUIDED gebruiken
+        # verschillende controllers, dus de overgang geeft een kleine
+        # positiecorrectie. De grondtak heeft deze pauze al na de takeoff.
+        # Zonder hem komt de eerste meting van de 360°-draai van een nog
+        # niet stilhangende drone — precies het datapunt waarmee de rest
+        # van de draai vergeleken wordt.
+        if not _wait_with_pilot_check(STEP_PAUSE_S, status, get_mav):
+            abort_if_pilot(); return
+    else:
+        # ---- GUIDED ----
+        _set_state('guided', 'GUIDED-mode instellen...')
+        emit_fn('mission_update', get_mission_state())
+        _cmd_set_mode_guided(get_mav, mavutil)
+        if not _wait_with_pilot_check(2, status, get_mav):
+            abort_if_pilot(); return
 
-    # Wacht tot de doelhoogte bereikt is (of timeout), met overname-check
-    deadline = time.time() + TAKEOFF_TIMEOUT_S
-    while time.time() < deadline:
-        if abort_if_pilot():
+        # ---- ARM ----
+        _set_state('arm', 'Armen...')
+        emit_fn('mission_update', get_mission_state())
+        _cmd_arm(get_mav, mavutil)
+        if not _wait_with_pilot_check(3, status, get_mav):
+            abort_if_pilot(); return
+
+        # Controleer of we echt gearmd zijn
+        if not status.get('armed', False):
+            _set_state('fout', 'Armen mislukt (check RC aan + GPS) — missie afgebroken', active=False)
+            emit_fn('mission_update', get_mission_state())
             return
-        alt = status.get('altitude', 0)
-        if alt >= takeoff_alt_m * 0.95:   # 95% = hoog genoeg
-            break
-        time.sleep(0.3)
 
-    if not _wait_with_pilot_check(STEP_PAUSE_S, status, get_mav):
-        abort_if_pilot(); return
+        # ---- TAKEOFF ----
+        _set_state('takeoff', f'Opstijgen naar {takeoff_alt_m} m...')
+        emit_fn('mission_update', get_mission_state())
+        _cmd_takeoff(get_mav, mavutil, takeoff_alt_m)
+
+        # Wacht tot de doelhoogte bereikt is (of timeout), met overname-check
+        deadline = time.time() + TAKEOFF_TIMEOUT_S
+        while time.time() < deadline:
+            if abort_if_pilot():
+                return
+            alt = status.get('altitude', 0)
+            if alt >= takeoff_alt_m * 0.95:   # 95% = hoog genoeg
+                break
+            time.sleep(0.3)
+
+        if not _wait_with_pilot_check(STEP_PAUSE_S, status, get_mav):
+            abort_if_pilot(); return
 
     # ---- 360° DRAAI ----
     _set_state('yaw', 'Draaien 360°...')

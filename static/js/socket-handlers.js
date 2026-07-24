@@ -128,6 +128,19 @@ function updateDroneStatusCard(data) {
             armedEl.className = 'status-badge disarmed';
         }
     }
+
+    // Hangt de drone al, dan start de missie door over te nemen op de
+    // huidige hoogte en doet de ingestelde zoekhoogte niets meer. Het veld
+    // uitgrijzen voorkomt dat de operator een waarde invult die genegeerd
+    // wordt. De drempel spiegelt MIN_AIRBORNE_ALT_M in mission.py.
+    const inDeLucht = data.armed && data.altitude > 1.5;
+    const altEl = document.getElementById('mission-alt');
+    if (altEl) {
+        altEl.disabled = inDeLucht;
+        altEl.title = inDeLucht
+            ? 'Niet van toepassing: de drone zoekt op zijn huidige hoogte'
+            : 'Maximaal 5 m — de geofence staat op 10 m';
+    }
 }
 
 
