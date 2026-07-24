@@ -75,6 +75,11 @@ TAKEOFF_TIMEOUT_S    = 30.0
 MIN_SATELLITES     = 8
 REQUIRE_3D_FIX     = True
 
+# Hoe oud het laatste beaconpacket maximaal mag zijn bij de pre-flight.
+# Ruim boven de ~1 s zendinterval, zodat een enkel gemist packet de start
+# niet blokkeert, maar krap genoeg om een uitstaande beacon te betrappen.
+BEACON_MAX_AGE_S   = 10
+
 # Onder deze accustand slaan we de resterende rondes over. Eén ronde kost
 # ~36 x (draai + 5 metingen) ≈ 4 min; met minder marge willen we landen.
 MIN_BATTERIJ_VOLGENDE_RONDE = 40
@@ -429,7 +434,11 @@ def _run_meting(status, get_mav, emit_fn, hoogtes):
     """
     from pymavlink import mavutil
 
-    stempel = datetime.now().strftime('%Y%m%d_%H%M')
+    # Seconden meegenomen in de stempel: een meting die vroeg afbreekt
+    # (geen fix, piloot neemt over) schrijft partiële data weg, en een
+    # herstart binnen dezelfde minuut zou die met minuut-resolutie stil
+    # overschrijven. Twee metingen kunnen niet in dezelfde seconde starten.
+    stempel = datetime.now().strftime('%Y%m%d_%H%M%S')
     rondes = {}          # hoogte -> rijen, ook nodig in het finally-blok
     gps = (0.0, 0.0)
 
@@ -459,6 +468,19 @@ def _run_meting(status, get_mav, emit_fn, hoogtes):
             _set_state('fout',
                        f'Te weinig satellieten ({sats}/{MIN_SATELLITES}) — '
                        f'meting afgebroken', active=False)
+            emit_fn('meting_update', get_meting_state())
+            return
+
+        # Hoort de ontvanger de beacon überhaupt? Zonder packets loopt elke
+        # sample in zijn timeout: de meting duurt dan ~21 minuten in plaats
+        # van ~8, de accu haalt dat niet, en je landt met 72 rijen
+        # n_metingen=0. Drie seconden op de grond verliezen is goedkoper
+        # dan een volledige veldsessie.
+        laatste = status.get('lora_last_seen_sec', -1)
+        if laatste < 0 or laatste > BEACON_MAX_AGE_S:
+            _set_state('fout',
+                       'Geen beaconsignaal — controleer of de beacon '
+                       'aanstaat en zendt', active=False)
             emit_fn('meting_update', get_meting_state())
             return
 
@@ -535,6 +557,18 @@ def _run_meting(status, get_mav, emit_fn, hoogtes):
             rondes[hoogte] = rijen
             if not _meetronde(status, get_mav, mavutil, emit_fn, hoogte, rijen):
                 afbreken_door_piloot(); return
+
+            # Kwam er over de hele ronde geen enkel packet binnen, dan is de
+            # beacon tijdens de vlucht uitgevallen (of buiten bereik geraakt).
+            # Een volgende ronde levert dan alleen maar lege rijen op terwijl
+            # hij wel accu kost: liever nu landen met bruikbare informatie
+            # over wat er mis is.
+            if not any(r['n_metingen'] > 0 for r in rijen):
+                _set_state('geen_signaal',
+                           f'Geen enkel packet op {hoogte} m — beacon lijkt '
+                           f'uitgevallen, resterende rondes overgeslagen')
+                emit_fn('meting_update', get_meting_state())
+                break
 
         # ---- landen ----
         _set_state('landen', 'Meting klaar — landen...')
