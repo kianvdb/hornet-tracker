@@ -1,8 +1,8 @@
 /**
- * MISSION-CONTROLS — demo-missie besturing + noodknoppen
+ * MISSION-CONTROLS — zoekvlucht starten + noodknoppen
  *
  * Bevat:
- *  - startMission()        start de autonome zoeksequentie
+ *  - startMission()        start de autonome ZOEKVLUCHT (search.py)
  *  - missionRTL()          EINDE MISSIE: terug naar opstijgpunt en landen
  *  - missionStopHang()     LOITER (niet aan een knop gekoppeld, zie hieronder)
  *  - missionLand()         LAND (niet aan een knop gekoppeld, zie hieronder)
@@ -20,10 +20,11 @@
  *  - reuse: setFeedback()          uit drone-controls.js (feedback-element)
  */
 
-// Minimale GPS-eisen — moeten matchen met MIN_SATELLITES in mission.py
+// Minimale GPS-eisen — moeten matchen met MIN_SATELLITES in search.py
 const MISSION_MIN_SATS = 8;
 
-// Zoekhoogte-grenzen — moeten matchen met MIN/MAX_TAKEOFF_ALT_M in mission.py.
+// Zoekhoogte-grenzen — moeten matchen met MIN/MAX_TAKEOFF_ALT_M in mission.py
+// (search.py clampt via mission._clamp_altitude, dus dezelfde grens).
 // De server clampt opnieuw; deze waarden zijn UX, geen veiligheid.
 // De bovengrens komt uit de geofence (FENCE_ALT_MAX = 10 m) minus marge
 // voor overshoot en wind — zie de toelichting in mission.py.
@@ -59,15 +60,23 @@ function readTakeoffAltitude() {
 }
 
 /**
- * Start de autonome demo-missie. We tonen meteen feedback; de echte
- * voortgang komt via mission_update events van de server.
+ * Start de autonome zoekvlucht. We tonen meteen feedback; de echte voortgang
+ * komt via meting_update events van de server (zie pattern-controls.js) —
+ * hetzelfde kanaal als de metingen, zodat alles op één statusregel landt.
+ *
+ * De knop heet nog START MISSIE en start sinds de koppeling aan search.py
+ * de zoekvlucht in plaats van de demo-missie. Die demo-missie bestaat nog
+ * als terugval en start je vanuit de browserconsole:
+ *     socket.emit('start_demo_mission', { altitude: 2.5 })
  *
  * Veiligheid: we checken eerst de pre-flight status client-side zodat de
- * operator niet per ongeluk start zonder GPS-fix. De server checkt het
- * nog een keer (mission.py pre-flight), dus dit is alleen UX.
+ * operator niet per ongeluk start zonder GPS-fix. De server checkt het nog
+ * een keer (search.py pre-flight, inclusief een beacon-check), dus dit is
+ * alleen UX.
  *
- * De zoekhoogte komt uit het #mission-alt veld en wordt meegestuurd in
- * de payload. Server-side wordt hij opnieuw geclampt.
+ * De zoekhoogte komt uit het #mission-alt veld en wordt meegestuurd in de
+ * payload; search.py gebruikt hem als starthoogte voor het peilen en clampt
+ * hem opnieuw.
  */
 function startMission() {
     // Client-side pre-flight waarschuwing (server checkt ook)
@@ -86,7 +95,7 @@ function startMission() {
 
     const hoogte = readTakeoffAltitude();
 
-    setMissionStatus(`🚀 Missie starten (${hoogte} m)...`, '#f5a623');
+    setMissionStatus(`🚀 Zoekvlucht starten (${hoogte} m)...`, '#f5a623');
     window.socket.emit('start_mission', { altitude: hoogte });
 }
 
@@ -131,9 +140,9 @@ function missionLand() {
 // ============================================
 
 /**
- * Registreer de mission_update handler. De server (mission.py via emit_fn)
- * stuurt bij elke stap een update met {step, message, active, aborted_by_pilot}.
- * Wordt aangeroepen vanuit main bootstrap.
+ * Registreer de mission_update handler. Dat kanaal is nu alleen nog van de
+ * demo-missie (mission.py); de zoekvlucht meldt via meting_update. Beide
+ * schrijven naar #mission-status.
  */
 function registerMissionHandlers() {
     window.socket.on('mission_update', function(data) {

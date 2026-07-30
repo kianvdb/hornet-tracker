@@ -165,6 +165,31 @@ async function initCoordLogFromServer() {
 }
 
 
+/**
+ * Luister naar entries die de SERVER zelf aanmaakt — vandaag alleen de
+ * beaconpositie die search.py na een zoekvlucht wegschrijft.
+ *
+ * Waarom via een socket-event en niet via de gewone POST-flow: de zoekvlucht
+ * draait in een thread op de Pi en moet zijn resultaat kunnen vastleggen ook
+ * als er op dat moment geen browser openstaat. De server schrijft de entry
+ * dus zelf weg; dit is puur de live weergave ervan.
+ *
+ * De guard op bestaande id's voorkomt een dubbele pin als het event binnenkomt
+ * terwijl initCoordLogFromServer() de entry ook al had opgehaald.
+ */
+function registerLogEntryHandler() {
+    if (!window.socket) return;
+    window.socket.on('log_entry_added', function(entry) {
+        if (!entry || coordLog.some(e => e.id === entry.id)) return;
+
+        coordLog.push(entry);
+        placeMarker(entry, coordLog.length);
+        updateLogDisplay();
+        window.showToast(`📍 Beacon gevonden — entry #${coordLog.length} gelogd`);
+    });
+}
+
+
 // ============================================
 // LOG-FLOW START — auto pin of map-click
 // ============================================
@@ -684,6 +709,7 @@ function cancelLogEntry() {
 // ============================================
 
 window.initCoordLogFromServer = initCoordLogFromServer;
+window.registerLogEntryHandler = registerLogEntryHandler;
 window.logCoordinate          = logCoordinate;
 window.handleMapClick         = handleMapClick;
 window.openLogModal           = openLogModal;

@@ -18,9 +18,10 @@ Toekomstige LoRa ontvanger (Ra-01 via SPI):
 Kalibratie van beacon v2 (zie beacon.ino):
   - SF9, BW 125 kHz, 433 MHz, ~200ms time-on-air, elke 500ms
 """
-import mission  # onze demo-missie module
+import mission  # demo-missie (terugval voor de verdediging, geen knop meer)
 import pattern  # stralingsdiagram-meting (rotatie, ontwikkelgereedschap)
 import approach  # vooruit-nadering van de beacon (ontwikkelgereedschap)
+import search  # het zoekalgoritme achter de START MISSIE-knop
 from flask import Flask, render_template, jsonify, request, send_file
 import io
 import json
@@ -2006,21 +2007,92 @@ def handle_set_mode(data):
 # MISSIE + NOODKNOPPEN (demo autonome vlucht)
 # ============================================
 
+def log_beacon_positie(lat, lon, alt, notities):
+    """
+    Schrijf een door search.py gevonden beaconpositie in de coördinaat-log
+    en meld hem aan het dashboard.
+
+    Server-side en niet vanuit de browser, want de vlucht loopt door of er
+    nu iemand naar het scherm kijkt of niet: een operator die tijdens de
+    zoekvlucht zijn telefoon vergrendelt mag de coördinaat niet kwijtraken.
+    De browser krijgt het resultaat via 'log_entry_added' en tekent de pin
+    er live bij; komt hij later terug, dan staat de entry er gewoon al.
+    """
+    from datetime import datetime
+
+    lat = round(float(lat), 7)
+    lon = round(float(lon), 7)
+    nu = datetime.now()
+
+    # Zelfde velden als POST /api/log, inclusief het adres: de verdelger
+    # krijgt liever een straatnaam dan alleen coördinaten.
+    entry = {
+        'id':      generate_entry_id(),
+        'lat':     lat,
+        'lon':     lon,
+        'alt':     float(alt or 0),
+        'time':    nu.strftime('%H:%M:%S'),
+        'date':    nu.isoformat(),
+        'source':  'drone',
+        'status':  'gemeld',
+        'notes':   notities,
+        'address': reverse_geocode(lat, lon) or '',
+    }
+
+    entries = load_log()
+    entries.append(entry)
+    if not save_log(entries):
+        print('!! beaconpositie kon niet worden opgeslagen')
+        return None
+
+    socketio.emit('log_entry_added', entry)
+    print(f'Beaconpositie gelogd: {lat}, {lon}')
+    return entry
+
+
 @socketio.on('start_mission')
 def handle_start_mission(data=None):
     """
-    START MISSIE-knop. Start de zoeksequentie in een aparte thread.
+    START MISSIE-knop. Start de ZOEKVLUCHT (search.py) in een aparte thread.
+
+    Deze knop startte eerder de autonome demo-missie (mission.py). Die missie
+    bestaat nog — zie handle_start_demo_mission hieronder — maar hangt niet
+    meer aan een knop: hij bewijst alleen dat autonoom vliegen werkt, en de
+    zoekvlucht is wat het toestel eigenlijk moet doen.
 
     Frontend stuurt {'altitude': <float>} mee — de zoekhoogte uit het
-    dashboard-invoerveld. De hoogte wordt server-side opnieuw geclampt
-    in mission.py; de browser-clamp is alleen UX.
+    dashboard-invoerveld, hergebruikt als starthoogte voor het peilen. De
+    hoogte wordt server-side opnieuw geclampt; de browser-clamp is alleen UX.
 
-    data=None als default zodat een emit zonder payload (oude client,
-    of een handmatige emit vanuit de console) niet crasht.
+    data=None als default zodat een emit zonder payload (oude client, of een
+    handmatige emit vanuit de console) niet crasht.
     """
     payload = data or {}
     altitude = payload.get('altitude')
-    print(f'START MISSIE ontvangen van frontend (hoogte {altitude} m)')
+    print(f'START ZOEKVLUCHT ontvangen van frontend (zoekhoogte {altitude} m)')
+    success, message = search.start_search(
+        status, get_mav_connection, socketio.emit, altitude,
+        log_fn=log_beacon_positie
+    )
+    socketio.emit('command_result', {'success': success, 'message': message})
+
+
+@socketio.on('start_demo_mission')
+def handle_start_demo_mission(data=None):
+    """
+    De autonome demo-missie (mission.py): opstijgen, draaien, vooruit, landen.
+
+    Bewust NIET aan een knop gekoppeld. Hij reageert niet op signalen en is
+    dus geen veldfunctie, maar hij is wel de terugval voor de thesis-
+    verdediging: als de zoekvlucht op de dag zelf niet wil (geen beacon, geen
+    fix, wind), toont dit nog steeds een werkende autonome vlucht.
+
+    Starten vanuit de browserconsole:
+        socket.emit('start_demo_mission', {altitude: 2.5})
+    """
+    payload = data or {}
+    altitude = payload.get('altitude')
+    print(f'START DEMO-MISSIE ontvangen (hoogte {altitude} m)')
     success, message = mission.start_mission(
         status, get_mav_connection, socketio.emit, altitude
     )
@@ -2040,23 +2112,6 @@ def handle_start_meting(data=None):
     print(f'START METING ontvangen van frontend (hoogtes {hoogtes})')
     success, message = pattern.start_meting(
         status, get_mav_connection, socketio.emit, hoogtes)
-    socketio.emit('command_result', {'success': success, 'message': message})
-
-
-@socketio.on('start_approach')
-def handle_start_approach(data=None):
-    """
-    Start de vooruit-nadering van de beacon (ontwikkelgereedschap).
-
-    Dit is de knop die de rotatiemeting verving. data=None als default zodat
-    een emit zonder payload niet crasht; de hoogte wordt in approach.py naar
-    2/3/4 m gerond.
-    """
-    payload = data or {}
-    hoogte = payload.get('hoogte', 3.0)
-    print(f'START NADERING ontvangen van frontend (hoogte {hoogte})')
-    success, message = approach.start_meting(
-        status, get_mav_connection, socketio.emit, hoogte)
     socketio.emit('command_result', {'success': success, 'message': message})
 
 
