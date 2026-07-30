@@ -1,13 +1,25 @@
 __pycache__/
 *.pyc
 *.log
-*.csv
 venv/
 .env
 .vscode/
+
+# Pixhawk-parameterdumps en andere lokale geheimen — NOOIT naar git/GitHub.
+# Deze map is voor de operator zelf (backup van de vlieg-instellingen).
+secrets/
 
 # Runtime data — persistente log entries, niet in git
 data/coord-log.json
 
 # Tile cache — locally generated PNG bestanden, niet in git
 data/tiles/
+
+# Pixhawk dataflash-logs — groot (MB's per vlucht), horen niet in git.
+# LOGS/ = van de SD-kaart gekopieerd; data/dataflash/ = via download_dataflash.py
+LOGS/*.BIN
+data/dataflash/*.bin
+
+# LET OP: GEEN blanket *.csv meer. De meet-CSV's (pattern_*, approach_*) in
+# data/ zijn onderzoeksdata die de thesis onderbouwt — klein en waardevol, en
+# horen JUIST in git. Het oude '*.csv' negeerde precies die bestanden.

@@ -19,7 +19,8 @@ Kalibratie van beacon v2 (zie beacon.ino):
   - SF9, BW 125 kHz, 433 MHz, ~200ms time-on-air, elke 500ms
 """
 import mission  # onze demo-missie module
-import pattern  # stralingsdiagram-meting (ontwikkelgereedschap)
+import pattern  # stralingsdiagram-meting (rotatie, ontwikkelgereedschap)
+import approach  # vooruit-nadering van de beacon (ontwikkelgereedschap)
 from flask import Flask, render_template, jsonify, request, send_file
 import io
 import json
@@ -42,7 +43,10 @@ import numpy as np
 SIGNAL_SOURCE = 'lora'
 
 # --- RTL-SDR parameters ---
-CENTER_FREQ = 433.0e6        # Beacon frequentie (Hz)
+CENTER_FREQ = 433.2e6        # Beacon frequentie (Hz) — zelfde beacon als LoRa,
+                             # naar 433,2 verschoven zodat BW125 binnen de
+                             # EN 300 220-bandrand (433,05 MHz) blijft
+
 SAMPLE_RATE = 2.048e6        # RTL-SDR native rate (Hz)
 GAIN = 49.6                  # dB
 NUM_SAMPLES = 16384          # per meting (~8ms data)
@@ -746,8 +750,13 @@ class LoRaSource(SignalSource):
         lora.set_dio_mapping([0] * 6)
 
         # Match beacon config exact (zie beacon.ino):
-        # 433 MHz, BW 125 kHz, SF 7, CR 4/5, CRC on, sync word default
-        lora.set_freq(433.0)
+        # BW 125 kHz, SF 7, CR 4/5, CRC on, sync word default
+        # Frequentie 433,2 i.p.v. 433,0: bij BW125 spreidt het signaal ±62,5
+        # kHz, en op 433,0 stak dat 12,5 kHz onder de EN 300 220-bandrand
+        # (433,05 MHz) uit. 433,2 houdt de hele bandbreedte binnen de band.
+        # MOET matchen met beacon.ino — anders geen ontvangst (200 kHz mismatch
+        # bij BW125 = niets binnen).
+        lora.set_freq(433.2)
         lora.set_bw(7)            # BW index 7 = 125 kHz
         lora.set_spreading_factor(7)
         lora.set_coding_rate(1)   # 1 = 4/5
@@ -769,7 +778,7 @@ class LoRaSource(SignalSource):
                 f"Check bedrading (NSS/MISO/MOSI/SCK/RST/DIO0)."
             )
         print(f"LoRa Ra-01 OK: RegVersion=0x{version:02x}, "
-              f"433.0 MHz, BW 125 kHz, SF 7")
+              f"433.2 MHz, BW 125 kHz, SF 7")
 
         # Start RX-thread
         self._stop.clear()
@@ -908,7 +917,7 @@ class LoRaSource(SignalSource):
             self._board = None
 
     def describe(self):
-        return "LoRa Ra-01 SX1278 @ 433.0 MHz, BW 125 kHz, SF 7"
+        return "LoRa Ra-01 SX1278 @ 433.2 MHz, BW 125 kHz, SF 7"
 
 
 def make_signal_source():
@@ -2031,6 +2040,23 @@ def handle_start_meting(data=None):
     print(f'START METING ontvangen van frontend (hoogtes {hoogtes})')
     success, message = pattern.start_meting(
         status, get_mav_connection, socketio.emit, hoogtes)
+    socketio.emit('command_result', {'success': success, 'message': message})
+
+
+@socketio.on('start_approach')
+def handle_start_approach(data=None):
+    """
+    Start de vooruit-nadering van de beacon (ontwikkelgereedschap).
+
+    Dit is de knop die de rotatiemeting verving. data=None als default zodat
+    een emit zonder payload niet crasht; de hoogte wordt in approach.py naar
+    2/3/4 m gerond.
+    """
+    payload = data or {}
+    hoogte = payload.get('hoogte', 3.0)
+    print(f'START NADERING ontvangen van frontend (hoogte {hoogte})')
+    success, message = approach.start_meting(
+        status, get_mav_connection, socketio.emit, hoogte)
     socketio.emit('command_result', {'success': success, 'message': message})
 
 

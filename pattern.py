@@ -92,7 +92,7 @@ MAX_HOOGTE_M = 5.0
 # Vaste meetomstandigheden, puur voor de CSV-header zodat een losse file
 # later nog zelf-verklarend is.
 BEACON_TX_DBM      = 2
-LORA_CONFIG        = 'SF7 / BW125 kHz / 433.0 MHz'
+LORA_CONFIG        = 'SF7 / BW125 kHz / 433.2 MHz'
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 

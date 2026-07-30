@@ -1,12 +1,16 @@
 /**
- * PATTERN-CONTROLS — stralingsdiagram-meting starten en volgen
+ * PATTERN-CONTROLS — beacon-nadering starten en volgen
  *
  * ONTWIKKELGEREEDSCHAP. Deze knop ijkt het zoekalgoritme; hij hoort niet
  * bij de werkstroom van de verdelger en mag weg zodra de drempels vaststaan.
  *
+ * De knop startte eerder de rotatiemeting (pattern.py); die is afgerond en
+ * de knop wijst nu naar de vooruit-nadering (approach.py). De rotatiecode
+ * blijft in de codebase voor het geval hij terugkomt.
+ *
  * Bevat:
  *  - showMetingModal()        toont de bevestigingsmodal
- *  - startMeting()            emit start_meting na bevestiging
+ *  - startMeting()            emit start_approach na bevestiging
  *  - registerMetingHandlers() luistert naar meting_update van de server
  *
  * De voortgang landt in #mission-status — dezelfde plek als de missie en de
@@ -19,9 +23,17 @@
  *  - reuse: hideModals()      uit modals.js
  */
 
-// Hoogtes van de twee meetrondes. Server clampt opnieuw (1,5–5 m), dus dit
-// is puur wat we vragen, geen veiligheidsgrens.
-const METING_HOOGTES = [2.0, 4.0];
+// Terugvalhoogte als er geen radio-keuze gevonden wordt (bv. oude DOM).
+// De server rondt opnieuw naar 2/3/4 m, dus dit is puur wat we vragen.
+const METING_DEFAULT_HOOGTE = 3.0;
+
+
+/** Lees de gekozen hoogte (2/3/4 m) uit de radio-buttons in de modal. */
+function leesMetingHoogte() {
+    const gekozen = document.querySelector('input[name="meting-hoogte"]:checked');
+    const val = gekozen ? parseFloat(gekozen.value) : NaN;
+    return isNaN(val) ? METING_DEFAULT_HOOGTE : val;
+}
 
 
 /** Toon de bevestigingsmodal. */
@@ -32,15 +44,16 @@ function showMetingModal() {
 
 
 /**
- * Start de meting. De modal heeft de operator al gewaarschuwd over de duur
+ * Start de nadering. De modal heeft de operator al gewaarschuwd over de duur
  * en het feit dat de zender in de hand moet zijn, dus hier geen tweede
  * confirm() meer — die zou alleen maar wegklikgedrag aanleren.
  */
 function startMeting() {
     if (!window.socket) return;
+    const hoogte = leesMetingHoogte();
     hideModals();
-    setMetingStatus('📊 Meting starten...', '#f5a623');
-    window.socket.emit('start_meting', { hoogtes: METING_HOOGTES });
+    setMetingStatus('📊 Nadering starten...', '#f5a623');
+    window.socket.emit('start_approach', { hoogte: hoogte });
 }
 
 
@@ -58,16 +71,11 @@ function registerMetingHandlers() {
 
 
 /**
- * Bouw de voortgangstekst. Tijdens het meten tonen we hoogte + stap, want
- * dat is het enige dat verandert; bij alle andere stappen is het
- * servermeldingsveld informatiever.
+ * Voortgangstekst = de servermelding. Zowel de rotatiemeting als de nadering
+ * zetten per stap een informatieve message ("Meten op 5 m afgelegd (5/14)"),
+ * dus we tonen die direct in plaats van hem client-side na te bouwen.
  */
 function formatMetingVoortgang(data) {
-    if (data.step === 'meten' && data.hoogte !== null && data.stap) {
-        // Nederlandse decimale komma: "2,0 m" leest natuurlijker dan "2.0 m"
-        const hoogte = data.hoogte.toFixed(1).replace('.', ',');
-        return `Meting ${hoogte} m — stap ${data.stap}/${data.totaal_stappen}`;
-    }
     return data.message || 'Meting bezig...';
 }
 
