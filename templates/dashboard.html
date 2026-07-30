@@ -144,10 +144,6 @@
         <button class="navbar-btn" onclick="openTileCacheModal()" title="Offline kaart-tiles beheren">
                 🗺️ Offline kaart
             </button>
-            <button class="navbar-btn" onclick="showMetingModal()"
-                    title="Beacon-nadering meten: recht op de beacon af (ontwikkelgereedschap)">
-                📊 Nadering
-            </button>
             <button class="navbar-btn" onclick="showRebootModal()" title="Herstart Pi">
                 🔄 Herstart
             </button>
@@ -402,56 +398,6 @@
             <div class="btn-group" style="justify-content: center;">
                 <button class="btn btn-secondary" onclick="hideModals()">Annuleren</button>
                 <button class="btn btn-danger" onclick="confirmArm()">ARMEN</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Beacon-nadering: ontwikkelgereedschap, geen veldfunctie -->
-    <div class="modal" id="meting-modal">
-        <div class="modal-content">
-            <h3>📊 Beacon-nadering meten</h3>
-            <p style="text-align:left; color:#aaa;">
-                Richt de drone bij het opstijgen recht op de beacon. Hij vliegt
-                dan in stappen naar de beacon toe en eroverheen (0 tot 20 m),
-                meet SNR/RSSI per stap, en keert met RTL terug. Duur ongeveer
-                4 minuten.
-            </p>
-            <p style="text-align:left; color:#aaa;">
-                Zorg dat de beacon op de gemarkeerde 15 m staat en dat de zender
-                in de hand is — de meting stopt zodra je met de SwC-switch
-                overneemt.
-            </p>
-
-            <!-- Hoogtekeuze staat er voor een latere tweede hoogte
-                 (correlatie-vergelijking); voorlopig vliegt de operator 3 m. -->
-            <div style="text-align:left; margin: 4px 0 12px 0;">
-                <span style="color:#aaa;">Zoekhoogte:</span>
-                <label style="margin-left:12px; color:#eee;">
-                    <input type="radio" name="meting-hoogte" value="2.0"> 2 m
-                </label>
-                <label style="margin-left:12px; color:#eee;">
-                    <input type="radio" name="meting-hoogte" value="3.0" checked> 3 m
-                </label>
-                <label style="margin-left:12px; color:#eee;">
-                    <input type="radio" name="meting-hoogte" value="4.0"> 4 m
-                </label>
-            </div>
-            <p style="text-align:left; color:#f5a623; font-size:0.9em;">
-                ⚠️ Dit is ontwikkelgereedschap voor het ijken van het
-                zoekalgoritme, geen functie voor de verdelger.
-            </p>
-            <!--
-              Spierheugen-val: het oude losse measure_pattern.py eiste juist
-              een GESTOPTE service. Dat script is weg, maar de gewoonte niet.
-            -->
-            <p style="text-align:left; color:#f5a623; font-size:0.9em;">
-                De service moet draaien (dat is nu het geval — je ziet dit
-                scherm). Stop hem niet, in tegenstelling tot het oude losse
-                meetscript.
-            </p>
-            <div class="btn-group" style="justify-content: center;">
-                <button class="btn btn-secondary" onclick="hideModals()">Annuleren</button>
-                <button class="btn btn-success" onclick="startMeting()">Start nadering</button>
             </div>
         </div>
     </div>
