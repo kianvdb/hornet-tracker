@@ -184,25 +184,34 @@
             <div class="card">
                 <h2>Hoornaarsignaal</h2>
 
-                <!-- TIER 1: primaire info — RSSI + detectie badge -->
+                <!-- TIER 1: primaire info — RSSI + trend + detectie badge.
+                     De trend staat naast het getal omdat het algoritme op de
+                     VERANDERING beslist, niet op de absolute waarde: 9-11 dB
+                     van de RSSI komt uit de kijkrichting en maar ~7 dB uit
+                     het hele afstandsbereik 15->6 m. -->
                 <div class="lora-primary">
                     <div class="lora-rssi-block">
                         <div class="lora-rssi-value" id="lora-rssi">-- dBm</div>
                         <div class="lora-rssi-label">Hoornaarsignaalsterkte</div>
                     </div>
+                    <div class="lora-trend" id="lora-trend"></div>
                     <div class="lora-detect-badge" id="lora-detect-badge">
                         Geen signaal
                     </div>
                 </div>
 
-                <!-- TIER 1: visuele bar — absolute schaal -120..-40 dBm -->
+                <!-- TIER 1: visuele bar. Schaal op het WERKELIJK gemeten
+                     bereik (-110..-85 dBm over 152 meetpunten uit zes
+                     meetvluchten); op de oude -120..-40 schaal bewoog deze
+                     balk over al die metingen samen maar 28% van zijn
+                     breedte. -->
                 <div class="lora-bar-container">
                     <div class="lora-bar-fill" id="lora-bar-fill" style="width: 0%"></div>
                 </div>
                 <div class="lora-bar-scale">
-                    <span>-120 dBm</span>
-                    <span>-80</span>
-                    <span>-40 dBm</span>
+                    <span>-110 dBm</span>
+                    <span>zwak → sterk</span>
+                    <span>-85 dBm</span>
                 </div>
 
                 <!-- TIER 2: signaalgetrouwheid + laatst ontvangen -->

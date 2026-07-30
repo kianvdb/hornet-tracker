@@ -73,6 +73,26 @@
     margin-top: 2px;
 }
 
+/* --- TREND — sterker / gelijk / zwakker ---
+   Staat naast de RSSI-waarde. Bewust kleiner dan het getal: het is een
+   duiding erbij, geen tweede meetwaarde. De plek houdt zijn breedte ook
+   als er niets staat, zodat de badge ernaast niet verspringt zodra het
+   signaal wegvalt. */
+
+.lora-trend {
+    font-size: 0.9em;
+    font-weight: bold;
+    font-family: 'Consolas', 'Monaco', monospace;
+    color: #666;
+    white-space: nowrap;
+    min-width: 7.5ch;
+    text-align: left;
+}
+
+.lora-trend.stijgt { color: #4ade80; }   /* groen  — warm, goede kant op */
+.lora-trend.daalt  { color: #f87171; }   /* rood   — verkeerde kant op   */
+.lora-trend.gelijk { color: #888;    }   /* grijs  — geen uitspraak      */
+
 .lora-detect-badge {
     padding: 8px 14px;
     border-radius: 16px;
@@ -92,7 +112,7 @@
     animation: pulse 1.5s infinite;
 }
 
-/* --- TIER 1 — absolute RSSI bar (-120..-40 dBm) --- */
+/* --- TIER 1 — RSSI bar (schaal in signal-display.js) --- */
 
 .lora-bar-container {
     width: 100%;
