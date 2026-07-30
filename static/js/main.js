@@ -43,6 +43,7 @@
         window.registerMissionHandlers();             // demo-missie voortgang (mission_update)
         window.registerMetingHandlers();              // zoekvlucht + metingen (meting_update)
         window.registerLogEntryHandler();             // beaconpositie van de zoekvlucht
+        window.registerSearchDirectionHandler();      // volgende zet op de kaart
         window.registerPopoverOutsideClick();
 
         console.log('[main] Klaar.');

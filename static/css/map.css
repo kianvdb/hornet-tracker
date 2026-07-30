@@ -181,3 +181,26 @@
 .map-address-search .address-suggestions.show {
     display: block;
 }
+/* Label bij de aangekondigde zoekrichting (search.py -> map.js).
+   Leaflet's standaard tooltip is wit met een zwarte rand en valt uit de
+   toon op de donkere kaart; deze volgt dezelfde kleuren als de rest van
+   het dashboard. pointer-events uit zodat het label een klik op de kaart
+   (manuele pin) niet opvangt. */
+.leaflet-tooltip.richting-tooltip {
+    background: #1a1f3a;
+    border: 1px solid #5e8bff;
+    border-radius: 6px;
+    color: #dbe4ff;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+}
+
+/* Leaflet tekent standaard een pijltje in de tooltip-kleur; dat is hier
+   wit en zou naast de blauwe rand staan. */
+.leaflet-tooltip.richting-tooltip::before {
+    border-right-color: #5e8bff;
+}

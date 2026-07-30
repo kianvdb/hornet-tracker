@@ -2140,6 +2140,19 @@ def handle_mission_land():
 
 @socketio.on('shutdown')
 def handle_shutdown():
+    """
+    Afsluiten-knop: een echte systeem-shutdown, geen service-stop.
+
+    KLOK: de Pi heeft geen RTC, dus de tijd moet vóór het uitgaan bewaard
+    worden. Hier staat bewust geen eigen 'fake-hwclock save' — `shutdown`
+    start de systemd shutdown-transactie en fake-hwclock-save.service hangt
+    daar al in (shutdown.target.wants, Before=shutdown.target). Geverifieerd
+    in het journal van deze Pi. Het gebeurt vanzelf; de operator hoeft er
+    niet aan te denken en hoeft er dus ook niets van te zien.
+
+    Alleen de stekker eruit trekken omzeilt dit — dan verliest de klok tot
+    een uur (fake-hwclock-save.timer draait hourly).
+    """
     print('Shutdown aangevraagd')
     socketio.emit('shutdown_status', {'message': 'Pi wordt afgesloten...'})
     time.sleep(1)

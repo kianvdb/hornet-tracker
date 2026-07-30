@@ -201,6 +201,19 @@ TAKEOFF_TIMEOUT_S = 30.0
 # meer dan 180° hoeft een kandidaatrichting nooit te zijn.
 DRAAI_TIMEOUT_S = 15.0
 
+# Hoe lang de volgende zet op de kaart staat vóórdat de drone hem uitvoert.
+#
+# Zonder deze pauze verschijnt de lijn op hetzelfde moment dat het commando
+# uitgaat, en dan leidt de operator de richting nog steeds af uit de
+# beweging. Met een korte voorsprong ziet hij waar het toestel heen gaat
+# terwijl het nog stilhangt, en kan hij ingrijpen vóór het vertrekt in
+# plaats van erna.
+#
+# Kosten: ~1,5 s per beslissing. Een vlucht neemt er grofweg acht
+# (kandidaten, naderingsstappen, de pass), dus ~12 s van de ~76 s accumarge
+# bij 4°/s. Op 0.0 zetten houdt de kaartlijn maar haalt de wachttijd weg.
+AANKONDIGING_S = 1.5
+
 # Pre-flight eisen — gelijk aan de andere modules
 MIN_SATELLITES   = 8
 REQUIRE_3D_FIX   = True
@@ -699,6 +712,36 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
         melden('gestopt', 'Piloot heeft overgenomen — zoekvlucht gestopt',
                active=False)
 
+    def kondig_richting_aan(fase, bearing, afstand_m, toelichting):
+        """
+        Teken de volgende zet op de kaart en wacht even vóór hij uitgevoerd
+        wordt.
+
+        Dit gaat over vertrouwen in een autonoom toestel: de operator staat
+        met de zender in de hand en moet kunnen zien wat het plan is voordat
+        de drone vertrekt, niet erna. De lijn vertrekt vanaf de GPS-positie
+        van dit moment, zodat hij ook klopt als de telemetrie iets naloopt.
+
+        Returns False als de piloot tijdens de aankondiging overneemt.
+        """
+        emit_fn('search_richting', {
+            'actief': True,
+            'lat': status.get('gps_lat', 0.0),
+            'lon': status.get('gps_lon', 0.0),
+            'bearing': round(bearing % 360, 1),
+            'afstand_m': round(afstand_m, 1),
+            'fase': fase,
+            'toelichting': toelichting,
+        })
+        if AANKONDIGING_S <= 0:
+            return True
+        return pattern._wacht(AANKONDIGING_S, status)
+
+    def wis_richting():
+        """Haal de richtingslijn van de kaart — de zet is uitgevoerd of de
+        vlucht is voorbij."""
+        emit_fn('search_richting', {'actief': False})
+
     def naar_huis(reden):
         """
         Elke faalweg loopt hier langs: RTL, met de reden in de melding.
@@ -828,6 +871,14 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
                    f'Fase 2/5 — kandidaat {nummer}/{len(kandidaten)} op '
                    f'{hoek:.0f}° verifiëren', fase=2)
 
+            # Aankondigen vóór het draaien, niet vóór de stap: de operator
+            # ziet de lijn dan al staan terwijl de neus nog moet draaien en
+            # de nulmeting nog loopt — ruim de meeste voorsprong die er is.
+            if not kondig_richting_aan(
+                    2, hoek, VERIFICATIE_STAP_M,
+                    f'kandidaat {nummer}/{len(kandidaten)} verifiëren'):
+                afbreken_door_piloot(); return
+
             # Eerst de neus op de kandidaat, dan pas meten: anders zit het
             # antenne-effect van de draai in het voor/na-verschil.
             bereikt, afgebroken = _draai_naar(status, get_mav, mavutil, hoek)
@@ -900,6 +951,10 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
             melden('verifieren',
                    f'Kandidaat {hoek:.0f}° verworpen ({stijging:+.1f} dB) — '
                    f'terug naar startpunt', fase=2)
+            if not kondig_richting_aan(2, hoek + 180, VERIFICATIE_STAP_M,
+                                       'terug naar startpunt'):
+                afbreken_door_piloot(); return
+
             terug_lat = status.get('gps_lat', 0.0)
             terug_lon = status.get('gps_lon', 0.0)
             _cmd_positie_offset(get_mav, mavutil, -dn, -de, hoek)
@@ -957,6 +1012,10 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
             melden('naderen',
                    f'Fase 3/5 — naderen: stap {stap}, koers {bearing:.0f}°',
                    fase=3)
+
+            if not kondig_richting_aan(3, bearing, NADERING_STAP_M,
+                                       f'naderingsstap {stap}'):
+                afbreken_door_piloot(); return
 
             start_lat = status.get('gps_lat', 0.0)
             start_lon = status.get('gps_lon', 0.0)
@@ -1054,6 +1113,11 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
                f'Fase 4/5 — overvliegen: {pass_afstand:.0f} m op '
                f'{PASS_SNELHEID_CMS / 100:.1f} m/s', fase=4)
 
+        if not kondig_richting_aan(
+                4, bearing, pass_afstand,
+                f'overvliegen — beacon geschat op {SATURATIE_AFSTAND_M:.0f} m'):
+            afbreken_door_piloot(); return
+
         _cmd_set_param(get_mav, mavutil, 'WPNAV_SPEED', PASS_SNELHEID_CMS)
         snelheid_aangepast = True
         if not pattern._wacht(1.0, status):
@@ -1104,6 +1168,15 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
     finally:
         # Wat er ook gebeurd is: snelheid terugzetten, wegschrijven wat we
         # hebben, en de positie loggen als we er een hebben.
+
+        # De richtingslijn hoort bij een zet die nog moet komen. Er komt er
+        # geen meer, dus hij moet van de kaart — ook na een afbreking, anders
+        # blijft er een plan staan dat niet meer uitgevoerd wordt.
+        try:
+            wis_richting()
+        except Exception as e:
+            print(f"[search] richtingslijn wissen mislukt: {e}")
+
         # WPNAV_SPEED terugzetten gebeurt óók als de piloot heeft overgenomen.
         # Dat is geen stuurcommando en botst dus niet met "de zender is
         # primair": het zet alleen een instelling terug. Zou hij op 0,5 m/s
