@@ -2,8 +2,8 @@
 
 Zelfstandig ontwerpdocument voor het bouwen van `search.py`. Het vat de zes
 meetvluchten en de ontwerpreview samen zodat een volgend gesprek kan bouwen
-zonder de hele meetgeschiedenis te herhalen. Status: **ontwerp vastgelegd,
-nog niet gebouwd.**
+zonder de hele meetgeschiedenis te herhalen. Status: **gebouwd**; fase 1 herzien na de
+eerste veldvlucht (1-8-2026) van continu naar stapsgewijs.
 
 ---
 
@@ -46,27 +46,37 @@ omdat de plateau-piek 0,3 dB boven de beacon-richting lag, binnen de ruis.
 
 ## 3. Het algoritme — 5 fasen
 
-### Fase 1 — Peilen (continu)
-Eén **continue** draai (niet 36 losse stops — die kostten bijna de hele accu).
-De meetthread logt **elke packet met de heading op dat moment**. Ná de draai:
-mediaan over hoekvensters (~15°) om uitschieters te filteren. **Kandidaten** =
-de sterkste richting + alle richtingen binnen 2 dB daarvan.
+### Fase 1 — Peilen (STAPSGEWIJS, 12 × 30°)
+Draai naar de hoek, **stop**, laat uitzweven, meet 5 packets stilstaand,
+draai door. Twaalf stops op het vaste kompasraster 0, 30, 60 … 330°. Per hoek
+de mediaan van SNR én RSSI. **Kandidaten** = de sterkste richting + alle
+richtingen binnen 2 dB daarvan, geclusterd per lob.
 
-Vereist de test-beacon op ~2 Hz (zie §4 / bandrand-commit). De **draaisnelheid
-bepaalt de filtering**: bij 2 Hz krijg je `2 × (15/ω)` metingen per 15°-venster,
-dus langzamer draaien = meer metingen = robuustere mediaan tegen de waargenomen
-uitschieters. Drie opties (zie §4 en het budget in §6):
+**Waarom niet continu — dit is teruggedraaid, draai het niet terug.** Het
+eerste ontwerp draaide in één vloeiende beweging rond (4°/s) en plakte elk
+binnenkomend packet aan de heading van dat moment. Dat is op de eerste
+veldvlucht (1-8) verlaten. De reden is structureel: meetwaarde en heading
+komen uit verschillende bronnen met verschillende ververssnelheden — de
+LoRa-ontvangstthread schrijft SNR en de packetteller meteen weg, de RSSI
+wordt pas door `signal_loop` (10 Hz) bijgewerkt, en de heading komt via
+`GLOBAL_POSITION_INT` op 4 Hz binnen. Zolang de drone draait betekent "een
+ander tijdstip" ook "een andere hoek", en is niet te garanderen dat de drie
+velden in één rij bij dezelfde richting horen.
 
-| Draai | Draaitijd | Metingen/15°-venster | Filtering |
-|---|---|---|---|
-| 3°/s | 120 s | 10 | best — maar krapste accumarge |
-| **4°/s** | **90 s** | **~7-8** | **middenweg — aanbevolen** |
-| 6°/s | 60 s | 5 | zwakst — alleen om accu te sparen |
+Stilstaand meten haalt die vraag volledig weg: beweegt de drone niet, dan
+maakt het niet uit of de heading 250 ms oud is. Geen kalibratie, geen
+aanname over vertragingen, geen bewijslast.
 
-**Aanbeveling: 4°/s.** 6°/s (5 metingen/venster) is te weinig voor een robuuste
-mediaan gegeven de uitschieters; 3°/s filtert het best maar laat te weinig
-accumarge voor een verworpen kandidaat (zie §6). Langzamer is altijd *veiliger*
-(scherpere peiling); sneller alleen bewust om accu te sparen.
+Het is bovendien de methode van de **zes geslaagde rotatiemetingen**
+(pattern.py, 36 × 10°). De continue variant was een accu-optimalisatie en is
+de enige peiling die faalde. 30° in plaats van 10° houdt het op 12 stops —
+een derde van de meettijd — en is nog steeds fijn genoeg tegenover de ±30°
+peilnauwkeurigheid.
+
+**Gemeten op de vlucht van 1-8:** de RSSI-kolom liep aantoonbaar één packet
+achter op de SNR-kolom (lag-correlatie +0,88 bij −1 tegen +0,84 bij 0). Bij
+3,7°/s is dat ~2° — klein, maar het is precies het soort koppeling dat met
+stilstaand meten per definitie niet kan optreden.
 
 ### Fase 2 — Verifiëren
 Per kandidaat: **5 m positie-gebaseerd** in die richting, RSSI vóór en ná.
@@ -104,19 +114,22 @@ dashboard-toast.
 
 ## 4. Parameters (met herkomst)
 
-**Rotatiesnelheid fase 1 — de eerste instelbare parameter.** Bepaalt de
-filtering én het accu-budget. Standaard **4°/s**; instelbaar op 3 / 4 / 6 °/s.
-**Langzamer is altijd veiliger** (meer metingen per venster → scherpere
-peiling); sneller kies je alleen bewust om accu te sparen. Telemetrie-skew
-blijft klein genoeg bij alle drie (≤ 1,5° bij 6°/s, minder bij langzamer).
+**Stapgrootte fase 1 — de eerste instelbare parameter.** Bepaalt de
+hoekresolutie én het accubudget. Standaard **30°** (12 stops). Fijner meet
+scherper maar kost lineair meer tijd; grover spaart accu maar kan twee
+naburige lobben samentrekken.
 
-| Draai | Metingen/15°-venster | Draaitijd | Wanneer |
+| Stap | Stops | Fase 1 | Wanneer |
 |---|---|---|---|
-| 3 °/s | 10 | 120 s | beste filtering; alleen bij vertrouwen in een eerste-keer-raak kandidaat (krappe marge, §6) |
-| **4 °/s** | ~7-8 | 90 s | **standaard — middenweg** |
-| 6 °/s | 5 | 60 s | alleen om accu te sparen; zwakste filtering |
+| 15° | 24 | ~155 s | te duur voor één accu |
+| **30°** | **12** | **~78-93 s** | **standaard** |
+| 45° | 8 | ~52 s | alleen om accu te sparen; kan lobben samentrekken |
 
-Overige parameters:
+Per stop: draai (30° bij 20°/s = 1,5 s) + heading-detectie (~1 s) + settle
+(1,5 s) + 5 packets (2,5 s bij 2 Hz; 3,7 s bij het waargenomen 33%
+pakketverlies) = **6,5-7,7 s**.
+
+Overige parameters:Overige parameters:
 
 | Parameter | Waarde | Herkomst |
 |---|---|---|
@@ -161,25 +174,35 @@ kandidaat**, `WPNAV_SPEED=1` m/s. De **vaste** fasen (alles behalve peilen):
 |---|---|
 | Takeoff + settle + arm | ~15 s |
 | 2. Verifiëren (1 kandidaat) | ~15 s |
+| — richtdraai vóór de nulmeting (2 kandidaten) | ~8 s |
 | 3. Naderen (15→6 m) | ~24 s |
 | 4. Overvliegen | ~30 s |
 | 5. RTL + landen | ~40 s |
-| **Vast subtotaal** | **~124 s** |
+| — aankondiging volgende zet (~8 × 1,5 s) | ~12 s |
+| **Vast subtotaal** | **~144 s** |
 
-Fase 1 (peilen) = draaitijd + ~10 s settle, en dus afhankelijk van de
-rotatiesnelheid. Totaal en marge tot de 5,0 min-grens (300 s):
+De richtdraai en de aankondiging zijn er ná de eerste veldvlucht bijgekomen:
+de richtdraai omdat de nulmeting van fase 2 anders het antenne-effect van de
+draai meemat, de aankondiging zodat de operator de volgende zet op de kaart
+ziet vóór de drone vertrekt.
 
-| Draai | Fase 1 | Vluchttotaal | Marge | Overleeft 1 verworpen kandidaat (~40 s)? |
-|---|---|---|---|---|
-| 3 °/s | 130 s | **254 s = 4,2 min** | 46 s (0,8 min) | **nee** — marge weg |
-| **4 °/s** | 100 s | **224 s = 3,7 min** | 76 s (1,3 min) | **ja**, met ~36 s over |
-| 6 °/s | 70 s | 194 s = 3,2 min | 106 s (1,8 min) | ja, ruim |
+Fase 1 (peilen) = 12 stops × 6,5-7,7 s, afhankelijk van het pakketverlies:
 
-**Aanbeveling: 4°/s.** Het past met ~1,3 min marge en overleeft één verworpen
-kandidaat. **3°/s filtert het best maar is te krap** — met 0,8 min marge blaast
-één verworpen kandidaat het over de grens; gebruik het alleen als je een
-eerste-keer-raak kandidaat verwacht (dichtbij, sterk contrast). 6°/s heeft de
-meeste marge maar de zwakste peiling-filtering (§3).
+| Fase 1 | Vluchttotaal | Marge tot 5,0 min | Overleeft 1 verworpen kandidaat (~40 s)? |
+|---|---|---|---|
+| 78 s (2 Hz, geen verlies) | **222 s = 3,7 min** | 78 s (1,3 min) | **ja** |
+| 93 s (2 Hz, 33% verlies) | **237 s = 4,0 min** | 63 s (1,1 min) | **ja**, met ~23 s over |
+
+**Het past, maar de marge is smal.** Op een accu die eerder leeg is dan de
+begrote 5,0 min — bijvoorbeeld bij 4,5 min bruikbaar — blijft er bij 33%
+pakketverlies nog 34 s over en past een verworpen kandidaat er **niet** meer
+bij. `PEIL_MAX_DUUR_S` (150 s) is de harde noodrem: valt de beacon stil, dan
+loopt elke meting in zijn packet-timeout en zou fase 1 anders de hele lading
+opmaken voordat er één meter gevlogen is.
+
+Het waargenomen pakketverlies van 33% op de vlucht van 1-8 is dus geen
+detail: het kost ~15 s extra in fase 1. Minder verlies is de goedkoopste
+manier om marge te winnen.
 
 **Op > 25 m past geen enkele snelheid op één vlucht:** nadering en RTL schalen
 met de afstand (op 40 m alleen al ~85 s nadering + ~50 s RTL). Verworpen
@@ -203,12 +226,13 @@ Hergebruik:
 - **`approach.py`** — de positie-stap-logica (`_wacht_op_stap`) voor fasen 2-3,
   en het thread/state/`finally`-patroon (`start_meting` → thread → CSV/log bij
   afbreken).
-- **NIET `pattern._verzamel_metingen`** — die meet **stilstaand** N samples.
-  Fasen 1 en 4 hebben **continue** logging nodig (elk packet + heading/GPS
-  tijdens beweging/draaien). Dat is een **nieuwe helper** in search.py; hergebruik
-  het idee (nieuw packet via `status['lora_packet_count']`, waarden uit
-  `status['signal_power']`/`['lora_snr']`, gekoppeld aan `status['heading']`/
-  `['gps_lat']`/`['gps_lon']`), niet de functie.
+- **`pattern._verzamel_metingen`** — stilstaand N packets met mediaan. Wordt
+  gebruikt door fase 1, 2 én 3. Fase 1 gebruikte eerst een eigen continue
+  helper; dat is teruggedraaid (zie §3).
+- **Alleen fase 4 logt continu** (`_log_continu` in search.py): de pass is
+  één doorlopende vlucht en de instort komt achteraf uit de reeks. Daar is
+  de GPS-positie leidend en niet de hoek, dus de koppeling is minder
+  gevoelig. Gebruik die helper niet opnieuw voor een peiling.
 
 Nieuwe commando-helper nodig: **positie-setpoint met vaste yaw** (GLOBAL_INT of
 LOCAL_NED met yaw-veld + type_mask) — bestaat nog niet in mission.py. Als de
@@ -227,8 +251,8 @@ naar `#mission-status` (bestaande meldingsplek).
   ogen. **Fase 4 is de minst-geverifieerde fase.**
 - **De gradiënt-nadering (fase 3)** — oscilleert hij niet rond de richting bij
   ruis op de RSSI? Bouw met demping / minimale-stap-drempel.
-- **Continue meting tijdens draaien (fase 1)** — haalt de heading-koppeling de
-  ≤ 1,5° skew bij 6°/s? Verifieer de timing tussen LoRa-thread en mavlink-thread.
+- ~~Continue meting tijdens draaien (fase 1)~~ — **vervallen**: fase 1 meet
+  stilstaand, dus er is geen heading-skew meer om te verifiëren.
 - **Beacon-frequentie-afhankelijkheid** — de peiling-timing hangt aan 2 Hz; de
   **veldtracker zendt lager voor batterijduur** en haalt dat niet. In het veld
   wordt peilen trager, óf de tracker heeft een tijdelijke "zoekstand". Bewuste

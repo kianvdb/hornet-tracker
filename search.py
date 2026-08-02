@@ -10,31 +10,50 @@ docs/zoekalgoritme-ontwerp.md — dat document is de bron, deze code volgt het.
 
 DE VIJF FASEN
 
-    1. peilen      continue draai (4°/s), elk packet gelogd met de heading van
-                   dat moment; achteraf mediaan per 15°-venster -> kandidaten
+    1. peilen      12 stops van 30°: draai, stop, meet stilstaand, draai door
+                   -> mediaan per hoek -> kandidaten
     2. verifiëren  5 m in de kandidaatrichting; RSSI moet >= 3 dB stijgen,
                    anders is het een reflectie en proberen we de volgende
-    3. naderen     5 m-stappen, na elke stap de KOERS corrigeren naar
-                   stijgende RSSI (niet blind de peil-bearing volgen)
-    4. overvliegen één gladde pass op 0,5 m/s met continue meting; de
-                   signaal-instort wordt ACHTERAF uit de log gehaald
+    3. doorvliegen één doorlopende vlucht op 0,5 m/s met continue meting,
+                   dwars over de bron heen; instort ACHTERAF uit de log
+    4. terugkruisen 180° draaien en dezelfde lijn terug meten; het middelpunt
+                   van de twee kruisingen heft een meetvertraging op
     5. afronden    RTL + coördinaat-log-entry + toast
 
-WAAROM DE KOERS CORRIGEERT MAAR DE NEUS NIET
-De peiling is maar nauwkeurig op ±30° (= ±7,5 m op 15 m afstand). Blind die
-bearing volgen laat de overvlieg-pass de beacon lateraal missen. Daarom
-corrigeert fase 3 de VLIEGRICHTING naar stijgende RSSI. De YAW blijft
-ondertussen vast op de peil-bearing: de antenne is richtingsgevoelig, dus
-alleen bij een constante oriëntatie zeggen RSSI-verschillen tussen stappen
-iets over afstand in plaats van over hoe de drone toevallig gedraaid staat.
-Dat is ook waarom hier een positie-setpoint met vast yaw-veld nodig was, dat
-mission.py nog niet had.
+WAAROM ER NIET MEER GECORRIGEERD WORDT ONDERWEG
+Fase 3 naderde eerst in stappen van 5 m met een koerscorrectie op de
+RSSI-gradiënt. Dat is verwijderd na de vlucht van 2-8: de drone stond op
+2,70 m van de beacon met het sterkste signaal van de vlucht en vloog er
+daarna 21 m vandaan, omdat de gradiëntlogica "ik loop ernaast" niet kon
+onderscheiden van "ik ben er net overheen".
 
-WAAROM NIET pattern._verzamel_metingen VOOR FASE 1 EN 4
-Die meet stilstaand N samples. Fase 1 en 4 meten tijdens BEWEGING en moeten
-elk packet koppelen aan de heading/GPS van dat moment — dat is _log_continu
-hieronder. Voor de stilstaande meetpunten in fase 2 en 3 wordt pattern's
-functie wél hergebruikt.
+Het kan nu ook zonder. Het zwaartepunt peilt op ~4-6°, en bij 17 m passeer
+je dan op 1,2-1,8 m van de bron — ruim binnen het bereik waarop de instort
+zichtbaar is. Eén doorlopende vlucht op 0,5 m/s geeft bovendien een sample
+elke 0,25 m, tegen één punt per 5 m bij stappen.
+
+De YAW ligt tijdens elke vlucht vast en wordt ERVOOR uitgedraaid: de antenne
+is richtingsgevoelig, dus een draaiende neus tijdens het meten levert een
+signaaldaling op die op een instort lijkt. Dat is precies wat op 2-8 misging.
+Daarvoor was het positie-setpoint met vast yaw-veld nodig dat mission.py
+niet had.
+
+WAAROM FASE 1 STILSTAAND MEET EN NIET TIJDENS EEN CONTINUE DRAAI
+Fase 1 draaide eerder in één vloeiende beweging rond terwijl elk packet aan
+de heading van dat moment werd geplakt. Dat is teruggedraaid, en het is de
+belangrijkste les uit de eerste veldvlucht: meetwaarde en heading komen uit
+verschillende bronnen met verschillende ververssnelheden (LoRa-RX-thread,
+signal_loop op 10 Hz, MAVLink op 4 Hz), dus terwijl de drone draait hoort
+een rij niet gegarandeerd bij één hoek. Stilstaand meten maakt die hele
+vraag irrelevant — beweegt de drone niet, dan is de hoek gewoon de hoek.
+Het is bovendien de methode van de zes GESLAAGDE rotatiemetingen in
+pattern.py; de continue variant was een accu-optimalisatie en is de enige
+peiling die faalde.
+
+Fase 1, 2 en 3 hergebruiken daarom pattern._verzamel_metingen (stilstaand,
+N packets, mediaan). Alleen fase 4 meet nog tijdens beweging — daar MOET
+dat, want de pass is één doorlopende vlucht en de instort wordt achteraf
+uit de reeks gehaald. Zie _log_continu.
 
 VEILIGHEIDSMODEL (identiek aan mission.py / pattern.py / approach.py)
   - De zender heeft ALTIJD voorrang. Zodra flight_mode niet meer GUIDED is,
@@ -67,32 +86,89 @@ import pattern
 # FASE 1 — PEILEN
 # ============================================
 
-# Draaisnelheid. Bepaalt zowel de filtering als het accubudget: bij een
-# beacon op 2 Hz krijg je 2 x (15/w) metingen per 15°-venster, dus langzamer
-# draaien = meer metingen = robuustere mediaan. 3°/s filtert het best maar
-# laat te weinig marge voor een verworpen kandidaat; 6°/s spaart accu maar
-# geeft nog maar 5 metingen per venster. 4°/s is de middenweg uit ontwerp §6.
-ROTATIE_SNELHEID_DPS = 4.0
-ROTATIE_GRADEN       = 360
-ROTATIE_MARGE_S      = 10.0   # extra wachttijd bovenop 360/snelheid
+# STAPSGEWIJS METEN — NIET CONTINU DRAAIEN.
+#
+# Deze fase draaide eerder in één vloeiende beweging rond terwijl elk
+# binnenkomend packet aan de heading van dát moment werd geplakt. Dat is
+# teruggedraaid. Lees dit voordat je het "optimaliseert":
+#
+#   Bij een continue draai komt de meetwaarde uit een andere bron en op een
+#   ander moment dan de heading. De LoRa-ontvangstthread schrijft SNR en de
+#   packetteller meteen weg, de RSSI wordt pas door signal_loop (10 Hz)
+#   bijgewerkt, en de heading komt via GLOBAL_POSITION_INT op 4 Hz binnen.
+#   Elke waarde in een rij kan dus van een ander tijdstip komen. Zolang de
+#   drone draait, betekent "een ander tijdstip" ook "een andere hoek".
+#
+#   Stilstaand meten haalt die afhankelijkheid volledig weg: als de drone
+#   niet beweegt, maakt het niet uit of de heading 250 ms oud is. De hoek
+#   is dan gewoon de hoek. Geen kalibratie, geen aanname over vertragingen,
+#   geen bewijslast — de fout kan simpelweg niet ontstaan.
+#
+# Dit is bovendien de methode van de zes GESLAAGDE rotatiemetingen
+# (pattern.py): draai naar de hoek, stop, laat uitzweven, meet. De continue
+# variant was een accu-optimalisatie en is de enige peiling die faalde.
+#
+# 30° in plaats van pattern.py's 10°: 12 stops in plaats van 36, een derde
+# van de meettijd. Dat past op de accu en is nog steeds fijn genoeg t.o.v.
+# de ±30° peilnauwkeurigheid die de metingen lieten zien.
+PEIL_STAP_GRADEN     = 30
+PEIL_AANTAL_STAPPEN  = 12          # 12 x 30° = volledige cirkel
+PEIL_METINGEN_PER_HOEK = pattern.METINGEN_PER_HOEK   # 5 packets per hoek
 
-# Hoekvensters waarover de mediaan gaat. 15° is grof genoeg om ~7-8 metingen
-# te bevatten bij 4°/s en fijn genoeg t.o.v. de ±30° peilnauwkeurigheid.
-HOEKVENSTER_GRADEN      = 15
-MIN_SAMPLES_PER_VENSTER = 3    # minder = venster te dun om op te vertrouwen
+# Uitzweven ná de draai en vóór de meting. De antenne moet stil hangen; een
+# nog uitzwaaiende drone meet zijn eigen beweging mee.
+SETTLE_NA_PEILSTAP_S = 1.5
 
-# Draaide hij écht rond? Als de yaw-opdracht niet is uitgevoerd, staan alle
-# samples in een handvol vensters en is de "peiling" betekenisloos. Dan is
-# doorvliegen erger dan stoppen.
-MIN_HOEKDEKKING_GRADEN = 270
+# Ruim boven de 1,5 s die 30° kost bij pattern.YAW_RATE_DPS (20°/s), met
+# marge voor wind en de eerste (mogelijk grotere) draai naar het raster.
+PEIL_HEADING_TIMEOUT_S = 10.0
 
-# Kandidaat-marge: de boomrand-reflectie lag 2 dB onder de beacon in de
-# rotatiemetingen, dus alles binnen 2 dB van de sterkste richting kan de
-# echte bron zijn en verdient een verificatie.
-KANDIDAAT_MARGE_DB = 2.0
+# Onder dit aantal hoeken mét packets is de peiling niet te vertrouwen: dan
+# heeft de beacon te vaak gezwegen om een richting uit te halen. Doorvliegen
+# op zo'n peiling is erger dan naar huis gaan.
+MIN_HOEKEN_MET_SIGNAAL = 8
+
+# Harde bovengrens op fase 1. Valt de beacon stil, dan loopt elke meting in
+# zijn packet-timeout en kan deze fase de hele accu opeten voordat er ook
+# maar één stap gevlogen is.
+PEIL_MAX_DUUR_S = 150.0
+
+# RICHTINGSCHATTING: ZWAARTEPUNT, NIET DE STERKSTE HOEK.
+#
+# De sterkste hoek nemen faalde op twee opeenvolgende veldvluchten, allebei
+# met een fout van 76-84°. De reden is gemeten: de hoofdlob is ~150° breed en
+# de SNR varieert daarbinnen maar ~1,0 dB, terwijl de ruis op het verschil
+# tussen twee hoeken (mediaan van 5 packets, sigma ~1,3 dB per packet) óók
+# ~1,0 dB is. Welke hoek binnen de lob toevallig de hoogste waarde krijgt is
+# dus een muntworp.
+#
+# Het zwaartepunt van dezelfde meetreeks wijst wél naar de bron — op beide
+# vluchten, met de beacon-richting onafhankelijk uit GPS-coördinaten bepaald:
+#
+#            beacon      piek        zwaartepunt
+#   1-8 21:05  132,6°   208,9° (76° eraf)   126,9° (5,7° eraf)
+#   1-8 17:38  133,7°   217,5° (84° eraf)   131,9° (1,8° eraf)
+#
+# BEKENDE ZWAKTE: het zwaartepunt is gevoelig voor een tweede bron. Getest op
+# een synthetisch patroon met een reflectie op 120° van de hoofdlob:
+#   reflectie 4 dB zwakker -> 0° fout;  2 dB zwakker -> 13°;  even sterk -> 60°.
+# Het ontwerp gaat uit van een boomrand-reflectie ~2 dB onder de beacon, dus
+# dit is precies de zone waar het begint te schuiven. Daarom blijft de piek
+# als TWEEDE kandidaat bestaan wanneer hij ver van het zwaartepunt ligt: dan
+# zijn het twee echt verschillende hypotheses en beslist fase 2 ertussen.
+#
+# Weging: 10^((snr - snr_min)/10), dus lineair vermogen ten opzichte van de
+# zwakste gemeten richting. SNR en niet RSSI omdat SNR op beide vluchten
+# dichter uitkwam (5,7/1,8° tegen 6,8/7,4°).
+#
+# Aanname: de meetpunten liggen ongeveer gelijk over de cirkel verdeeld. Bij
+# 12 stappen van 30° klopt dat; een vectorsom weegt niet naar hoekafstand,
+# dus bij sterk ongelijke verdeling zou dit scheeftrekken.
+PIEK_AFWIJKING_GRADEN = 45.0
 
 # Hoeveel kandidaten we maximaal proberen. Elke verworpen kandidaat kost
-# ~40 s en het accubudget (ontwerp §6) draagt er precies één bij 4°/s.
+# ~50 s (verificatiestap heen en terug op 10 m) en het accubudget draagt er
+# één (ontwerp §6).
 MAX_KANDIDATEN = 2
 
 
@@ -100,7 +176,32 @@ MAX_KANDIDATEN = 2
 # FASE 2 — VERIFIËREN
 # ============================================
 
-VERIFICATIE_STAP_M = 5.0   # RSSI stijgt ~0,8 dB/m -> 5 m geeft ~4 dB
+# Lengte van de verificatiestap. WAS 5 m, en dat kon rekenkundig niet werken.
+#
+# Padverlies loopt met 20*log10(d2/d1), dus de winst van een stap hangt af van
+# de AFSTAND, niet van een vaste dB/m. De oude onderbouwing ("RSSI stijgt
+# ~0,8 dB/m, dus 5 m geeft ~4 dB") nam een helling die alleen rond 11 m geldt
+# en behandelde die als constante. Wat een stap werkelijk oplevert bij een
+# perfect gepeilde richting:
+#
+#     afstand    stap 5 m   stap 10 m
+#       15 m      3,52 dB     9,54 dB
+#       18 m      2,83 dB     7,04 dB   <- beacon lag hier op de vlucht van 1-8
+#       21 m      2,36 dB     5,62 dB
+#       25 m      1,94 dB     4,44 dB
+#
+# Met de drempel op 3 dB betekende 5 m dat vanaf ~17 m GEEN ENKELE kandidaat
+# kon slagen, ook de juiste niet. Precies dat gebeurde twee vluchten op rij.
+#
+# 10 m verdraagt bovendien een slordige peiling. Maximale peilfout die nog
+# +3 dB haalt op 18 m: met 5 m geen enkele, met 10 m tot +-43°. Dat dekt de
+# ~6° van het zwaartepunt met ruime marge.
+#
+# LET OP bij korte afstand: onder ~10 m schiet deze stap over de bron heen.
+# Dat is niet schadelijk (de RSSI stijgt dan juist fors, dus de kandidaat
+# wordt bevestigd) en fase 3 corrigeert het met zijn heuvelklim. Verificatie
+# wordt sowieso overgeslagen boven VERIFY_OVERSLAAN_RSSI.
+VERIFICATIE_STAP_M = 10.0
 VERIFY_STIJGING_DB = 3.0   # onder de verwachte 4 dB, boven de ruis (2,5 dB)
 
 # Boven deze RSSI slaan we de verificatie over: de drone staat dan al zo
@@ -111,60 +212,87 @@ VERIFY_STIJGING_DB = 3.0   # onder de verwachte 4 dB, boven de ruis (2,5 dB)
 #
 # Dit is een GROVE afstandsschatting en wordt daarom alleen gebruikt om een
 # verificatie over te slaan (een fout kost hooguit een overbodige of gemiste
-# controlestap). Als aankomstcriterium in fase 3 deugt een absolute RSSI
-# niet — zie TOP_MARGE_DB.
+# controlestap). Als stopcriterium tijdens het doorvliegen zou een absolute
+# RSSI niet deugen: de hoek levert 9-11 dB, meer dan het hele afstandsbereik.
+# Daarom stopt fase 3 op een DALING t.o.v. het eigen sterkste punt.
 VERIFY_OVERSLAAN_RSSI = -88.0
 
 
 # ============================================
-# FASE 3 — NADEREN
+# FASE 3 EN 4 — DOORVLIEGEN EN TERUGKRUISEN
 # ============================================
-
-NADERING_STAP_M = 5.0
-
-# Minimale RSSI-stijging per stap om "we lopen de goede kant op" te mogen
-# concluderen. Ligt onder de verwachte ~4 dB per 5 m en boven wat een
-# mediaan van 5 packets aan ruis overhoudt.
-MIN_STIJGING_DB = 1.5
-
-# Koerscorrectie als de RSSI niet steeg. Vaste amplitude, en elke kant maar
-# één keer: eerst +30°, daarna -60° (= 30° aan de andere kant van de
-# oorspronkelijke koers). Zo kan de correctie per definitie niet oscilleren,
-# en 30° dekt de ±30° peilonnauwkeurigheid.
-GRADIENT_CORRECTIE_GRADEN = (30.0, -60.0)
-MAX_CORRECTIES            = len(GRADIENT_CORRECTIE_GRADEN)
-
-# Bovengrens op het aantal naderingsstappen. Van 25 m naar 6 m zijn er 4
-# nodig; meer dan 6 betekent dat we niet convergeren en de accu opmaken.
-MAX_NADERINGSSTAPPEN = 6
-
-# Hoe dicht bij het sterkste punt van de hele nadering een meetpunt moet
-# liggen om als "op de top van de heuvel" te tellen.
 #
-# Dit vervangt een absolute RSSI-drempel als aankomstcriterium, en dat is
-# geen detail: in de rotatiemetingen varieert de RSSI 9-11 dB over de HOEK,
-# terwijl het hele afstandsbereik 15 -> 6 m maar ~7 dB oplevert. Een vaste
-# dBm-grens zegt dus meer over hoe de drone gedraaid staat dan over hoe ver
-# de beacon is. Vergelijken met het eigen beste punt haalt die hoekterm eruit,
-# want de yaw ligt tijdens de hele nadering vast.
-TOP_MARGE_DB = 1.0
+# EEN DOORLOPENDE VLUCHT, GEEN STAPPEN MEER.
+#
+# Fase 3 naderde eerder in stappen van 5 m en corrigeerde na elke stap de
+# koers op de RSSI-gradiënt. Dat is verwijderd na de vlucht van 2-8. Wat er
+# gebeurde: de drone stond na twee stappen op 2,70 m van de beacon met het
+# sterkste signaal van de vlucht (-81 dBm) en vloog er vervolgens 21 meter
+# vandaan. De gradiëntlogica onthield alleen de beste WAARDE, niet de beste
+# PLEK, en kon "ik loop ernaast" niet onderscheiden van "ik ben er net
+# overheen" — beide geven een dalende RSSI. Drie koerscorrecties later was
+# het stappenmaximum op en begon de pass vanaf het slechtste punt.
+#
+# Waarom doorvliegen beter is nu de peiling klopt:
+#   - het zwaartepunt peilt op ~4-6°, en bij 17 m passeer je dan op 1,2-1,8 m
+#     van de bron: ruim binnen het bereik waarop de instort zichtbaar is
+#   - continu meten op 0,5 m/s bij 2 Hz geeft een sample elke 0,25 m, tegen
+#     één punt per 5 m bij stappen — twintig keer fijner
+#   - de instort is een veel sterker signaal (>5 dB over 1-3 m) dan de
+#     gradiënt tussen twee stappen (~1,5 dB, gelijk aan de ruis)
+#   - het is sneller: ~25 s in plaats van ~70 s voor stappen plus pass
+#
+# Wat we ervoor inleveren: er is geen koerscorrectie onderweg meer. Dat is
+# een bewuste ruil — de correctie werkte aantoonbaar averechts, en de
+# terugkruising hieronder geeft een tweede kans.
 
-# Onder ~6 m stijgt de RSSI niet meer (verzadiging). Dat is tegelijk het
-# stopcriterium van fase 3 en de aanname over hoe ver de beacon dan nog
-# vooruit ligt voor fase 4.
-SATURATIE_AFSTAND_M = 6.0
+# Hoe ver we maximaal doorvliegen. De verificatiestap heeft al 10 m
+# afgelegd, dus wat er rest is (oorspronkelijke afstand - 10 m) plus de
+# overshoot. Bij een startafstand van 25 m is dat 15 + 5 = 20 m.
+DOORVLIEG_MAX_M = 20.0
 
+# Hoever we doorvliegen NA de instort. Genoeg om de daling volledig in de
+# log te krijgen, niet meer.
+DOORVLIEG_VOORBIJ_M = 5.0
 
-# ============================================
-# FASE 4 — OVERVLIEGEN
-# ============================================
+# Live stopdrempel: is de RSSI zo ver onder het sterkste punt van deze
+# vlucht gezakt, dan zijn we er voorbij. Dit stopt alleen de VLUCHT; de
+# precieze positie komt nog altijd achteraf uit de log (zie _zoek_instort).
+# Ruimer dan de instort-drempel zodat ruis hem niet vroegtijdig afbreekt.
+INSTORT_LIVE_DB = 6.0
 
-PASS_VOORBIJ_M = 5.0   # hoever voorbij de geschatte positie de pass doorloopt
+# DE TERUGKRUISING.
+#
+# Na het doorvliegen draait de drone 180° en vliegt dezelfde lijn terug,
+# opnieuw metend. Dat levert een TWEEDE instort op, uit de tegengestelde
+# richting.
+#
+# Waarom dat meer is dan een herkansing: elke systematische vertraging in
+# de meetketen (de RSSI loopt een packet achter, plus verwerkingstijd)
+# schuift de geschatte instortpositie een vast aantal meters VOORUIT langs
+# de vliegrichting. Draai je om, dan schuift die fout precies de andere
+# kant op. Het MIDDELPUNT van de twee kruisingen is er dus vrij van,
+# zonder dat we de vertraging hoeven te kennen of te meten. Met één
+# kruising kan dat principieel niet.
+#
+# De terugweg is bovendien grotendeels gratis: de drone moet toch naar huis.
+TERUGKRUISING = True
 
-# Tijdens de pass zetten we WPNAV_SPEED tijdelijk op 50 cm/s: bij 2 Hz geeft
-# dat een sample elke 25 cm, fijn genoeg om een instort van ~1 m te zien.
-# Na de pass zetten we hem terug op de waarde uit de paramdump (100 = 1 m/s);
-# blijft hij op 50 staan, dan wordt ook de RTL half zo snel en dat kost accu.
+# Hoe lang de neus mag uitdraaien vóór er gemeten wordt.
+#
+# Dit is geen cosmetische pauze. Op de vlucht van 2-8 begon de pass terwijl
+# de yaw nog van 103° naar 143° draaide. De eerste vijf samples gaven SNR
+# +6,0 -> +1,2 -> 0,0: dat was de antenne die wegdraaide, geen instort. Op
+# die reeks zou _zoek_instort een positie hebben gelogd met betrouwbaarheid
+# HOOG die 20,9 m naast de echte beacon lag. Een fout-positief met hoge
+# zekerheid is het gevaarlijkste dat dit systeem kan produceren.
+YAW_SETTLE_VOOR_PASS_S = 3.0
+
+# Tijdens het doorvliegen en terugkruisen zetten we WPNAV_SPEED tijdelijk op
+# 50 cm/s: bij 2 Hz geeft dat een sample elke 25 cm, fijn genoeg om een
+# instort van ~1 m te zien. Daarna terug op de waarde uit de paramdump
+# (100 = 1 m/s); blijft hij op 50 staan, dan wordt ook de RTL half zo snel
+# en dat kost accu.
 PASS_SNELHEID_CMS      = 50.0
 STANDAARD_SNELHEID_CMS = 100.0
 
@@ -389,8 +517,17 @@ def _draai_naar(status, get_mav, mavutil, doel_graden):
 def _log_continu(status, duur_s, fase, samples, klaar_fn=None):
     """
     Log elk binnenkomend LoRa-packet met de heading en GPS van dat moment,
-    terwijl de drone beweegt. Dit is wat pattern._verzamel_metingen NIET kan:
-    die meet stilstaand een vast aantal samples.
+    terwijl de drone beweegt.
+
+    ALLEEN VOOR FASE 4. Fase 1 gebruikte dit ook en dat was fout: tijdens een
+    draai hoort de gelogde hoek niet gegarandeerd bij de gelogde meetwaarde,
+    omdat beide uit bronnen met verschillende ververssnelheden komen. Fase 1
+    meet daarom stilstaand (zie _peil_stapsgewijs). Gebruik deze functie niet
+    opnieuw voor een peiling.
+
+    Voor de pass in fase 4 is er geen alternatief: die moet in één rechte,
+    ononderbroken vlucht en de instort komt achteraf uit de reeks. Daar is de
+    GPS-positie leidend en niet de hoek, dus de koppeling is minder gevoelig.
 
     We pollen op 20 Hz op lora_packet_count. De koppeling packet -> heading
     is daarmee hooguit 50 ms scheef; bij 4°/s is dat 0,2° en dus ruim binnen
@@ -470,91 +607,373 @@ def _meet_punt(status, fase, samples, opmerking=''):
 # FASE 1 — PEILING UITREKENEN
 # ============================================
 
-def _vensters(samples):
+def _peil_rooster(huidige_heading):
     """
-    Verdeel de continu gelogde draai-samples in hoekvensters en neem de
-    mediaan-SNR per venster.
+    De hoeken die we aandoen: 0, 30, 60 ... 330 graden kompas.
 
-    SNR en niet RSSI: het hoekcontrast in de rotatiemetingen zat in de SNR
-    (dip -2 dB, piek +7 dB). RSSI is de afstandsmaat en komt pas in fase 2-3
-    aan bod.
+    Absolute rasterhoeken en niet "huidige heading + n x 30": dan zijn de
+    meetpunten van elke vlucht onderling vergelijkbaar, en zeggen twee
+    metingen op 30° over twee vluchten hetzelfde.
 
-    Returns een lijst (midden_hoek, snr_mediaan, aantal), gesorteerd op hoek.
-    Vensters met te weinig samples vallen af: die zijn te dun om een mediaan
-    op te bouwen die tegen de waargenomen uitschieters bestand is.
+    We beginnen wel bij de rasterhoek die het dichtst bij de huidige stand
+    ligt en lopen van daar met de klok mee rond. Dat scheelt eenmalig tot
+    180° draaien voordat de eerste meting valt.
     """
-    bakken = {}
-    for s in samples:
-        index = int(s['heading'] % 360 // HOEKVENSTER_GRADEN)
-        bakken.setdefault(index, []).append(s['snr'])
-
-    resultaat = []
-    for index, waarden in sorted(bakken.items()):
-        if len(waarden) < MIN_SAMPLES_PER_VENSTER:
-            continue
-        midden = index * HOEKVENSTER_GRADEN + HOEKVENSTER_GRADEN / 2.0
-        resultaat.append((midden, round(statistics.median(waarden), 2),
-                          len(waarden)))
-    return resultaat
+    rooster = [i * PEIL_STAP_GRADEN for i in range(PEIL_AANTAL_STAPPEN)]
+    begin = min(range(PEIL_AANTAL_STAPPEN),
+                key=lambda i: _hoekverschil(rooster[i], huidige_heading))
+    return [rooster[(begin + k) % PEIL_AANTAL_STAPPEN]
+            for k in range(PEIL_AANTAL_STAPPEN)]
 
 
-def _hoekdekking(samples):
+def _peil_stapsgewijs(status, get_mav, mavutil, samples, melden):
     """
-    Hoeveel graden van de cirkel zijn daadwerkelijk bemeten?
+    Draai het rooster af en meet op elke hoek STILSTAAND.
 
-    Als de yaw-opdracht niet is uitgevoerd staan alle samples in een handvol
-    vensters; de "peiling" is dan de richting waar de drone toevallig naar
-    keek. Dat is gevaarlijker dan geen peiling, dus we meten het.
+    Per stap: draai naar de absolute hoek -> wacht tot hij bereikt is ->
+    laat uitzweven -> meet PEIL_METINGEN_PER_HOEK packets -> mediaan.
+
+    Waarom stilstaand: zie de toelichting bij PEIL_STAP_GRADEN. Kort gezegd
+    komen meetwaarde en heading uit verschillende bronnen met verschillende
+    ververssnelheden; alleen als de drone niet beweegt maakt dat verschil
+    niets uit. De hoek die we loggen is de hoek waar hij op dat moment
+    daadwerkelijk stond, niet een geschatte hoek op een geschat tijdstip.
+
+    Een niet-bereikte hoek is geen reden om te stoppen: we meten dan op de
+    hoek waar hij staat en loggen die werkelijke hoek — hetzelfde compromis
+    als pattern._wacht_op_heading maakt. Beter een datapunt met de echte
+    hoek dan een gat in het diagram.
+
+    Returns (metingen, afgebroken_door_piloot, reden).
+      metingen = lijst (hoek_gemeten, rssi_mediaan, snr_mediaan, n)
     """
-    indexen = {int(s['heading'] % 360 // HOEKVENSTER_GRADEN) for s in samples}
-    return len(indexen) * HOEKVENSTER_GRADEN
+    metingen = []
+    begin = time.time()
+
+    for stap, doel in enumerate(_peil_rooster(status.get('heading', 0.0)), 1):
+        if pattern._pilot_has_taken_over(status):
+            return metingen, True, ''
+        if time.time() - begin > PEIL_MAX_DUUR_S:
+            return metingen, False, (f'Peiling duurde langer dan '
+                                     f'{PEIL_MAX_DUUR_S:.0f} s')
+
+        melden('peilen',
+               f'Fase 1/5 — peilen: hoek {doel}° '
+               f'({stap}/{PEIL_AANTAL_STAPPEN})', fase=1)
+
+        pattern._cmd_yaw_absoluut(get_mav, mavutil, doel)
+        einde = time.time() + PEIL_HEADING_TIMEOUT_S
+        bereikt = False
+        while time.time() < einde:
+            if pattern._pilot_has_taken_over(status):
+                return metingen, True, ''
+            if _hoekverschil(status.get('heading', 0.0),
+                             doel) <= pattern.HEADING_TOLERANTIE:
+                bereikt = True
+                break
+            time.sleep(0.1)
+        if not bereikt:
+            print(f"[search] hoek {doel}° niet gehaald binnen "
+                  f"{PEIL_HEADING_TIMEOUT_S:.0f}s — meet op "
+                  f"{status.get('heading', 0.0):.1f}°")
+
+        if not pattern._wacht(SETTLE_NA_PEILSTAP_S, status):
+            return metingen, True, ''
+
+        # Meten gebeurt NA het uitzweven en op een stilhangende drone.
+        rij, afgebroken = _meet_punt(status, 'peilen', samples,
+                                     f'hoek {doel}°')
+        if rij is not None:
+            metingen.append((rij['heading'], rij['rssi'], rij['snr'], rij['n']))
+            print(f"[search]   {rij['heading']:6.1f}°  RSSI {rij['rssi']:7.1f} dBm  "
+                  f"SNR {rij['snr']:+5.2f} dB  (n={rij['n']})")
+        else:
+            print(f"[search]   {doel:6.1f}°  geen packets")
+        if afgebroken:
+            return metingen, True, ''
+
+    return metingen, False, ''
 
 
-def _kandidaten(vensters):
+def _zwaartepunt(metingen):
+    """
+    Richting van het zwaartepunt van de gemeten lob (vermogensgewogen
+    vectorsom over alle hoeken).
+
+    Waarom dit en niet de sterkste hoek: zie de toelichting bij
+    PIEK_AFWIJKING_GRADEN. Kort: de lob is te breed en te vlak om er een
+    piek uit te vissen, maar zijn zwaartepunt ligt wel op de bron.
+
+    Weegt met 10^((snr - snr_min)/10): lineair vermogen ten opzichte van de
+    zwakste gemeten richting. Zo telt de achterkant van het patroon nauwelijks
+    mee zonder dat er een willekeurige constante bij hoeft.
+
+    Returns de hoek in graden, of None als er niets te wegen valt.
+    """
+    if not metingen:
+        return None
+    snr_min = min(m[2] for m in metingen)
+    x = y = 0.0
+    for meting in metingen:
+        hoek, snr = meting[0], meting[2]
+        gewicht = 10 ** ((snr - snr_min) / 10.0)
+        x += gewicht * math.cos(math.radians(hoek))
+        y += gewicht * math.sin(math.radians(hoek))
+    if x == 0.0 and y == 0.0:
+        return None
+    return math.degrees(math.atan2(y, x)) % 360
+
+
+def _lob_diagnose(metingen, kandidaten):
+    """
+    Beschrijf de vorm van de gemeten lob. Kost geen vliegtijd — het rekent
+    alleen na op wat fase 1 toch al heeft gemeten.
+
+    Waarom dit in de vlucht zit en niet in een aparte grondtest: op de grond
+    staat de operator zelf in het stralingspatroon en is de grondreflectie
+    dichtbij. Een drone die op 3 m in vrije lucht hangt meet de antenne zoals
+    hij werkelijk gebruikt wordt. Elke zoekvlucht is dus meteen de beste
+    patroonmeting die we kunnen doen.
+
+    De getallen die ertoe doen:
+      breedte     hoeveel graden liggen binnen 3 dB van de sterkste hoek.
+                  Een bruikbare richtantenne zit rond 50-70°; op de vluchten
+                  van 1-8 was het ~150°.
+      variatie    spreiding binnen die lob. Is die kleiner dan de ruis op een
+                  mediaan van 5 packets (~1 dB), dan is de sterkste hoek
+                  binnen de lob niet meer dan toeval — en dat is precies
+                  waarom kandidaat 1 het zwaartepunt is en niet de piek.
+      spreiding   piek versus zwaartepunt. Ver uit elkaar = brede lob of een
+                  tweede bron; dicht bij elkaar = scherpe, eenduidige peiling.
+
+    Returns een regel tekst voor de CSV-kop en het logboek.
+    """
+    if not metingen:
+        return 'lob: geen metingen'
+    if len(metingen) < 2:
+        return 'lob: te weinig hoeken gemeten'
+
+    hoeken = sorted(m[0] for m in metingen)
+    # Typische hoekafstand uit de data zelf halen, niet uit PEIL_STAP_GRADEN:
+    # dan klopt deze functie ook op oudere of anders bemeten reeksen.
+    stappen = sorted((hoeken[(i + 1) % len(hoeken)] - hoeken[i]) % 360
+                     for i in range(len(hoeken)))
+    typisch = stappen[len(stappen) // 2]
+    naast = typisch * 1.5
+
+    top = max(metingen, key=lambda m: m[2])
+    drempel = top[2] - 3.0
+    in_lob = {m[0] for m in metingen if m[2] >= drempel}
+
+    # Alleen de AANEENGESLOTEN lob rond de piek tellen. Een losse sterke
+    # uitschieter elders in de cirkel hoort niet bij deze lob en zou de
+    # breedte anders kunstmatig oprekken (op de vlucht van 17:38 maakte
+    # één hoek op 292 graden er 255 graden van in plaats van ~150).
+    volgorde = sorted(in_lob)
+    if top[0] not in volgorde:
+        volgorde.append(top[0]); volgorde.sort()
+    i = volgorde.index(top[0])
+    n = len(volgorde)
+    lob = [volgorde[i]]
+    for richting in (1, -1):
+        k = i
+        while True:
+            vorige = volgorde[k % n]
+            k += richting
+            huidige = volgorde[k % n]
+            if huidige in lob or len(lob) >= n:
+                break
+            if _hoekverschil(huidige, vorige) > naast:
+                break
+            lob.append(huidige)
+
+    if len(lob) >= 2:
+        gesorteerd = sorted(lob)
+        gaten = [(gesorteerd[(j + 1) % len(gesorteerd)] - gesorteerd[j]) % 360
+                 for j in range(len(gesorteerd))]
+        breedte = 360.0 - max(gaten)
+        breedte_tekst = f'{breedte:.0f}°'
+    else:
+        breedte = typisch
+        breedte_tekst = f'<={typisch:.0f}° (1 hoek)'
+
+    waarden = [m[2] for m in metingen if m[0] in lob]
+    variatie = max(waarden) - min(waarden)
+
+    zwaarte = _zwaartepunt(metingen)
+    spreiding = _hoekverschil(top[0], zwaarte) if zwaarte is not None else 0.0
+    buiten = len(in_lob) - len(lob)
+
+    # Het oordeel gaat over één vraag: is de sterkste hoek te vertrouwen?
+    #
+    # Twee manieren waarop hij dat niet is, allebei op een veldvlucht gezien:
+    #   1. er liggen nog andere, LOSSTAANDE richtingen binnen 3 dB van de top
+    #      (17:38: de piek zat in een smal lobje op 218° terwijl negen hoeken
+    #      rond 37-142° er ook binnen vielen — de beacon lag op 134°);
+    #   2. de lob is zo breed en zo vlak dat de piek erbinnen ruis is
+    #      (21:05: 148° breed met 1,0 dB variatie, en de ruis op het verschil
+    #      tussen twee hoeken is bij een mediaan van 5 packets ook ~1 dB).
+    #
+    # In beide gevallen is het zwaartepunt de betere schatter, en dat is
+    # precies waarom kandidaat 1 daaruit komt.
+    if buiten > 0:
+        oordeel = 'AMBIGU — meerdere losse richtingen binnen 3 dB'
+    elif breedte > 90 and variatie < 1.5:
+        oordeel = 'BREED — piek binnen de lob is ruis'
+    elif breedte > 90:
+        oordeel = 'BREED'
+    else:
+        oordeel = 'SCHERP — piek bruikbaar'
+
+    extra = f', {buiten} losse hoek(en) erbuiten' if buiten else ''
+    return (f'lob: {breedte_tekst} breed (3 dB){extra}, variatie erbinnen '
+            f'{variatie:.1f} dB, piek {top[0]:.0f}° vs zwaartepunt '
+            f'{zwaarte:.0f}° = {spreiding:.0f}° uiteen -> {oordeel}')
+
+
+def _kandidaten(metingen):
     """
     Kies de richtingen die het proberen waard zijn.
 
-    De sterkste richting plus alles binnen KANDIDAAT_MARGE_DB daarvan — de
-    boomrand-reflectie lag 2 dB onder de beacon, dus binnen die marge kan de
-    echte bron zitten. Naïef "hoogste piek" faalt aantoonbaar: op de
-    4 m-vlucht koos dat stap 32 (105°) terwijl de beacon op 30° stond, omdat
-    de plateau-piek 0,3 dB boven de beacon-richting lag.
+    Kandidaat 1 is het ZWAARTEPUNT van de gemeten lob. Kandidaat 2 is de
+    sterkste losse hoek, maar alleen als die meer dan PIEK_AFWIJKING_GRADEN
+    van het zwaartepunt af ligt. Liggen ze dicht bij elkaar, dan zeggen ze
+    hetzelfde en is een tweede verificatie zonde van de accu; liggen ze ver
+    uit elkaar, dan is dat juist het teken dat er een tweede bron in het
+    spel kan zijn en beslist fase 2 ertussen.
 
-    Aangrenzende vensters worden samengevoegd tot één lob: een bundel van
-    ±30° vult meerdere 15°-vensters, en die apart verifiëren zou de accu
-    opmaken aan vier keer dezelfde richting. Per lob houden we het sterkste
-    venster over.
+    Argument is een lijst (hoek, rssi, snr, n) uit _peil_stapsgewijs.
 
-    Returns een lijst (hoek, snr), sterkste eerst, maximaal MAX_KANDIDATEN.
+    Returns een lijst (hoek, snr), belangrijkste eerst, maximaal
+    MAX_KANDIDATEN.
     """
-    if not vensters:
+    if not metingen:
         return []
 
-    beste_snr = max(v[1] for v in vensters)
-    in_marge = [v for v in vensters if v[1] >= beste_snr - KANDIDAAT_MARGE_DB]
-    in_marge.sort(key=lambda v: v[0])
+    zwaarte = _zwaartepunt(metingen)
+    piek = max(metingen, key=lambda m: m[2])
+    if zwaarte is None:
+        return [(piek[0], piek[2])]
 
-    # Clusteren op aangrenzende hoeken; het laatste en eerste venster kunnen
-    # over 0° aan elkaar grenzen.
-    clusters = []
-    for venster in in_marge:
-        if clusters and _hoekverschil(venster[0], clusters[-1][-1][0]) <= HOEKVENSTER_GRADEN * 1.5:
-            clusters[-1].append(venster)
-        else:
-            clusters.append([venster])
-    if (len(clusters) > 1
-            and _hoekverschil(clusters[0][0][0], clusters[-1][-1][0]) <= HOEKVENSTER_GRADEN * 1.5):
-        clusters[0] = clusters[-1] + clusters[0]
-        clusters.pop()
+    # SNR van de dichtstbijzijnde meting meegeven, puur als melding: het
+    # zwaartepunt zelf is een berekende richting, geen meetpunt.
+    dichtst = min(metingen, key=lambda m: _hoekverschil(m[0], zwaarte))
+    kandidaten = [(zwaarte, dichtst[2])]
 
-    toppen = [max(c, key=lambda v: v[1]) for c in clusters]
-    toppen.sort(key=lambda v: v[1], reverse=True)
-    return [(t[0], t[1]) for t in toppen[:MAX_KANDIDATEN]]
+    if _hoekverschil(piek[0], zwaarte) > PIEK_AFWIJKING_GRADEN:
+        kandidaten.append((piek[0], piek[2]))
+
+    return kandidaten[:MAX_KANDIDATEN]
 
 
 # ============================================
 # FASE 4 — INSTORT UIT DE PASS HALEN
 # ============================================
+
+def _doorvliegen(status, get_mav, mavutil, bearing, max_m, fase, naam,
+                 samples, melden, kondig):
+    """
+    Eén doorlopende, langzame vlucht in 'bearing' met continue meting.
+
+    Draait EERST de neus op de koers en laat hem uitzweven, en begint pas
+    daarna te loggen — zie YAW_SETTLE_VOOR_PASS_S voor waarom dat cruciaal is.
+
+    Stopt zodra de RSSI INSTORT_LIVE_DB onder het sterkste punt van deze
+    vlucht is gezakt én we er DOORVLIEG_VOORBIJ_M voorbij zijn, of bij
+    max_m. Die live-stop begrenst alleen de VLUCHT; de precieze positie komt
+    achteraf uit de log (_zoek_instort), zodat een enkele ruispiek de
+    schatting niet kan bepalen.
+
+    Returns (afgebroken_door_piloot, eigen_samples, afgelegd_m).
+    """
+    if not kondig(fase, bearing, max_m, naam):
+        return True, [], 0.0
+
+    bereikt, afgebroken = _draai_naar(status, get_mav, mavutil, bearing)
+    if afgebroken:
+        return True, [], 0.0
+    if not bereikt:
+        print(f"[search] koers {bearing:.0f}° niet gehaald vóór {naam} — "
+              f"vliegt op {status.get('heading', 0.0):.1f}°")
+    if not pattern._wacht(YAW_SETTLE_VOOR_PASS_S, status):
+        return True, [], 0.0
+
+    start_lat = status.get('gps_lat', 0.0)
+    start_lon = status.get('gps_lon', 0.0)
+    begin = len(samples)
+
+    dn, de = _noord_oost(bearing, max_m)
+    _cmd_positie_offset(get_mav, mavutil, dn, de, bearing)
+
+    def afgelegd():
+        return approach._horizontale_afstand(
+            status.get('gps_lat', 0.0), status.get('gps_lon', 0.0),
+            start_lat, start_lon)
+
+    def klaar():
+        # Doel bereikt?
+        if afgelegd() >= max_m * 0.95:
+            return True
+        eigen = samples[begin:]
+        if len(eigen) < 4:
+            return False
+        top = max(eigen, key=lambda s: s['rssi'])
+        nu = eigen[-1]
+        if nu['rssi'] > top['rssi'] - INSTORT_LIVE_DB:
+            return False
+        # Ingestort — maar pas stoppen als we er ook echt voorbij zijn.
+        return approach._horizontale_afstand(
+            nu['lat'], nu['lon'], top['lat'], top['lon']) >= DOORVLIEG_VOORBIJ_M
+
+    timeout = max_m / (PASS_SNELHEID_CMS / 100.0) * 2.0 + 15.0
+    afgebroken, aantal = _log_continu(status, timeout, naam, samples,
+                                      klaar_fn=klaar)
+    weg = afgelegd()
+
+    # Stilhangen: _log_continu stoppen laat het positiedoel staan, dus zonder
+    # dit vliegt de drone door naar het oorspronkelijke verre punt.
+    if not afgebroken:
+        _cmd_positie_offset(get_mav, mavutil, 0.0, 0.0, bearing)
+
+    print(f"[search] {naam}: {aantal} packets over {weg:.1f} m")
+    return afgebroken, samples[begin:], weg
+
+
+def _combineer_instorten(heen, terug):
+    """
+    Voeg de instort van de heenweg en die van de terugkruising samen.
+
+    Het middelpunt van twee kruisingen uit tegengestelde richting is vrij van
+    elke systematische vertraging in de meetketen — zie de toelichting bij
+    TERUGKRUISING. Vandaar dat twee kruisingen samen betrouwbaarder zijn dan
+    de beste van de twee afzonderlijk.
+
+    Returns (lat, lon, betrouwbaarheid, uitleg) of None.
+    """
+    goed = [r for r in (heen, terug) if r is not None]
+    if not goed:
+        return None
+    if len(goed) == 1:
+        lat, lon, zeker, uitleg = goed[0]
+        return (lat, lon, zeker, f'één kruising: {uitleg}')
+
+    (la, loa, za, ua), (lb, lob, zb, ub) = goed
+    spreiding = approach._horizontale_afstand(la, loa, lb, lob)
+    lat, lon = (la + lb) / 2.0, (loa + lob) / 2.0
+
+    # Twee kruisingen die ver uit elkaar liggen, meten niet hetzelfde. Dan is
+    # het middelpunt geen verbetering maar een verzinsel.
+    if spreiding > 2 * INSTORT_VENSTER_M:
+        beste = goed[0] if za == 'hoog' else goed[-1]
+        return (beste[0], beste[1], 'laag',
+                f'kruisingen {spreiding:.1f} m uit elkaar — niet gemiddeld; '
+                f'{beste[3]}')
+
+    zeker = 'hoog' if (za == 'hoog' and zb == 'hoog') else 'midden'
+    return (lat, lon, zeker,
+            f'middelpunt van twee kruisingen ({spreiding:.1f} m uit elkaar); '
+            f'heen: {ua}; terug: {ub}')
+
 
 def _zoek_instort(pass_samples):
     """
@@ -646,13 +1065,15 @@ def _schrijf_csv(samples, stempel, hoogte, start_gps, kop):
         f.write(f"# meetmoment: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"# zoekhoogte: {hoogte} m\n")
         f.write(f"# GPS-startpositie: lat {start_gps[0]:.7f}, lon {start_gps[1]:.7f}\n")
-        f.write(f"# rotatiesnelheid fase 1: {ROTATIE_SNELHEID_DPS} graden/s\n")
+        f.write(f"# peiling fase 1: stapsgewijs, {PEIL_AANTAL_STAPPEN} hoeken "
+                f"van {PEIL_STAP_GRADEN} graden, stilstaand gemeten\n")
+        f.write(f"# metingen per hoek: {PEIL_METINGEN_PER_HOEK}\n")
         f.write(f"# beacon zendvermogen: {BEACON_TX_DBM} dBm\n")
         f.write(f"# lora config: {LORA_CONFIG}\n")
         for regel in kop:
             f.write(f"# {regel}\n")
-        f.write("# fase 1 en 4 = continue samples tijdens beweging; "
-                "fase 2 en 3 = stilstaande medianen\n")
+        f.write("# fase 1, 2 en 3 = STILSTAANDE medianen (1 rij per meetpunt); "
+                "alleen fase 4 logt continu tijdens de pass\n")
 
         kolommen = ['fase', 't_s', 'tijdstip', 'gps_lat', 'gps_lon', 'gps_alt',
                     'heading', 'rssi', 'snr', 'n', 'opmerking']
@@ -818,33 +1239,33 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
         # ================================================
         # FASE 1 — PEILEN
         # ================================================
-        draai_duur = ROTATIE_GRADEN / ROTATIE_SNELHEID_DPS
-        melden('peilen',
-               f'Fase 1/5 — peilen: {ROTATIE_GRADEN}° draaien op '
-               f'{ROTATIE_SNELHEID_DPS}°/s ({draai_duur:.0f} s)',
-               hoogte=hoogte, fase=1)
-
-        mission._cmd_yaw(get_mav, mavutil, ROTATIE_GRADEN, ROTATIE_SNELHEID_DPS)
-        afgebroken, aantal = _log_continu(
-            status, draai_duur + ROTATIE_MARGE_S, 'peilen', samples)
+        # STAPSGEWIJS, niet in één doorlopende draai. De reden staat
+        # uitgebreid bij PEIL_STAP_GRADEN; kort: bij een continue draai komen
+        # meetwaarde en heading uit bronnen met verschillende ververssnelheden
+        # en hoort een rij dus niet gegarandeerd bij één hoek. Stilstaand
+        # meten maakt die vraag irrelevant.
+        metingen, afgebroken, reden = _peil_stapsgewijs(
+            status, get_mav, mavutil, samples, melden)
         if afgebroken:
             afbreken_door_piloot(); return
 
-        dekking = _hoekdekking(samples)
-        vensters = _vensters(samples)
-        kandidaten = _kandidaten(vensters)
-        kop.append(f'fase 1: {aantal} packets, hoekdekking {dekking}°, '
-                   f'{len(vensters)} bruikbare vensters')
+        met_signaal = len(metingen)
+        kandidaten = _kandidaten(metingen)
+        kop.append(f'fase 1: stapsgewijs, {PEIL_AANTAL_STAPPEN} hoeken x '
+                   f'{PEIL_STAP_GRADEN}°, {met_signaal} met signaal')
 
-        print(f"[search] peiling: {aantal} packets, dekking {dekking}°")
-        for hoek, snr, n in vensters:
-            print(f"[search]   {hoek:5.1f}°  SNR {snr:+.2f} dB  (n={n})")
+        print(f"[search] peiling: {met_signaal}/{PEIL_AANTAL_STAPPEN} hoeken "
+              f"met signaal")
 
-        if aantal == 0:
+        if reden:
+            naar_huis(reden)
+            return
+        if met_signaal == 0:
             naar_huis('Geen enkel packet tijdens het peilen')
             return
-        if dekking < MIN_HOEKDEKKING_GRADEN:
-            naar_huis(f'Draai niet uitgevoerd (slechts {dekking}° bemeten)')
+        if met_signaal < MIN_HOEKEN_MET_SIGNAAL:
+            naar_huis(f'Slechts {met_signaal} van {PEIL_AANTAL_STAPPEN} hoeken '
+                      f'gaven signaal — peiling niet betrouwbaar')
             return
         if not kandidaten:
             naar_huis('Peiling gaf geen bruikbare richting')
@@ -852,6 +1273,14 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
 
         kop.append('kandidaten: ' + ', '.join(
             f'{h:.0f}° ({s:+.1f} dB)' for h, s in kandidaten))
+
+        # Elke vlucht is meteen een antennepatroon-meting: hier staat hoe
+        # scherp de lob was, en dus hoeveel de peiling waard is.
+        diagnose = _lob_diagnose(metingen, kandidaten)
+        kop.append(diagnose)
+        print(f"[search] {diagnose}")
+        melden('peilen', f'Fase 1/5 — {diagnose}', fase=1)
+
         if not pattern._wacht(SETTLE_NA_DRAAI_S, status):
             afbreken_door_piloot(); return
 
@@ -971,181 +1400,70 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
             return
 
         # ================================================
-        # FASE 3 — NADEREN OP RSSI-GRADIËNT
+        # FASE 3 — DOORVLIEGEN
         # ================================================
-        # YAW-KEUZE PER FASE — het waarom, want het is niet vanzelfsprekend.
-        #
-        # De rotatiemetingen laten zien dat de antenne 9-11 dB RSSI-verschil
-        # maakt tussen op-as en van-as. Dat is MEER dan de ~7 dB die het hele
-        # afstandsbereik 15 -> 6 m oplevert. De neusrichting is dus geen
-        # detail: hij bepaalt grotendeels wat je meet.
-        #
-        #   fase 2 — yaw VAST op de kandidaatrichting. Voor en na de 5 m-stap
-        #            staat de antenne identiek, dus het verschil van 3 dB is
-        #            zuiver afstand. Dat is precies wat de test moet toetsen.
-        #   fase 3 — yaw VOLGT de koers. Zo wijst de antenne altijd waar we
-        #            heen vliegen en is de RSSI maximaal als de koers naar de
-        #            bron wijst: de koerscorrectie zoekt dan tegelijk de
-        #            richting én de afstand. Met een vaste yaw draait de bron
-        #            juist uit de lob zodra we scheef lopen, en klim je op een
-        #            hoekhelling in plaats van een afstandshelling — daar liep
-        #            de simulatie op vast, op 5 tot 8 m van de beacon.
-        #   fase 4 — yaw VAST langs de pass-richting. De pass is één rechte
-        #            lijn, dus de oriëntatie verandert toch niet, en de
-        #            signaal-instort blijft zuiver geometrisch.
-        #
-        # De heading-drift die de naderingsmeting scheeftrok komt hier niet
-        # terug: die kwam van BODY-frame navigatie ("vlieg vooruit"), en wij
-        # commanderen noord/oost-meters. Wat de neus doet, raakt de baan niet.
-
-        vorige_rssi = None
-        beste_rssi = None       # sterkste punt van de hele nadering
-        ooit_gestegen = False   # is de RSSI ooit echt gestegen?
-        correctie_index = 0
-        laatste_punt = None
-
-        for stap in range(1, MAX_NADERINGSSTAPPEN + 1):
-            if accu_op():
-                naar_huis(f"Batterij {status.get('battery_percent')}%")
-                return
-
-            melden('naderen',
-                   f'Fase 3/5 — naderen: stap {stap}, koers {bearing:.0f}°',
-                   fase=3)
-
-            if not kondig_richting_aan(3, bearing, NADERING_STAP_M,
-                                       f'naderingsstap {stap}'):
-                afbreken_door_piloot(); return
-
-            start_lat = status.get('gps_lat', 0.0)
-            start_lon = status.get('gps_lon', 0.0)
-            dn, de = _noord_oost(bearing, NADERING_STAP_M)
-            _cmd_positie_offset(get_mav, mavutil, dn, de, bearing)
-            voltooid, afgebroken = approach._wacht_op_stap(
-                status, start_lat, start_lon, NADERING_STAP_M)
-            if afgebroken:
-                afbreken_door_piloot(); return
-            if not voltooid:
-                print(f"[search] stap {stap} niet bevestigd binnen timeout — "
-                      f"meet op de huidige positie")
-            if not pattern._wacht(SETTLE_NA_STAP_S, status):
-                afbreken_door_piloot(); return
-
-            punt, afgebroken = _meet_punt(
-                status, 'naderen', samples, f'stap {stap} koers {bearing:.0f}°')
-            if afgebroken:
-                afbreken_door_piloot(); return
-            if punt is None:
-                naar_huis('Geen packets meer tijdens naderen')
-                return
-
-            laatste_punt = punt
-            if vorige_rssi is None:
-                vorige_rssi = beste_rssi = punt['rssi']
-                continue
-
-            stijging = punt['rssi'] - vorige_rssi
-            print(f"[search] stap {stap}: RSSI {vorige_rssi:.0f} -> "
-                  f"{punt['rssi']:.0f} dBm ({stijging:+.1f} dB) op "
-                  f"koers {bearing:.0f}°")
-            vorige_rssi = punt['rssi']
-
-            if stijging >= MIN_STIJGING_DB:
-                # Koers klopt; een eventuele eerdere correctie was een omweg
-                # die we niet hoeven terug te draaien.
-                ooit_gestegen = True
-                correctie_index = 0
-                beste_rssi = max(beste_rssi, punt['rssi'])
-                continue
-
-            # Geen stijging — nu is de vraag: staan we op de TOP van de
-            # heuvel, of zijn we er langs gelopen?
-            #
-            # Op de top: dit punt is nog steeds het sterkste van de hele
-            # nadering. Verder klimmen kan niet, dus we zijn er; fase 4 mag
-            # beginnen. Dit is de verzadigingsstop uit het ontwerp, maar
-            # gemeten t.o.v. onze eigen beste meting in plaats van t.o.v.
-            # een absolute dBm-grens (zie TOP_MARGE_DB).
-            if punt['rssi'] >= beste_rssi - TOP_MARGE_DB:
-                kop.append(f'fase 3: top bereikt bij RSSI {punt["rssi"]:.0f} dBm '
-                           f'na {stap} stappen')
-                break
-
-            # Duidelijk zwakker dan ons beste punt: we lopen ernaast.
-            if correctie_index >= MAX_CORRECTIES:
-                # Beide correcties geprobeerd en nergens beter. Steeg de RSSI
-                # onderweg wél, dan zijn we bij de bron en is doorgaan naar de
-                # pass zinvoller dan opgeven; steeg hij nooit, dan liepen we
-                # niet naar een echte bron (ontwerp §5) en gaan we naar huis.
-                if not ooit_gestegen:
-                    naar_huis('RSSI steeg nergens tijdens het naderen — '
-                              'geen echte bron')
-                    return
-                kop.append(f'fase 3: correcties op na {stap} stappen, '
-                           f'doorgaan met beste punt {beste_rssi:.0f} dBm')
-                break
-
-            beste_rssi = max(beste_rssi, punt['rssi'])
-            correctie = GRADIENT_CORRECTIE_GRADEN[correctie_index]
-            correctie_index += 1
-            bearing = (bearing + correctie) % 360
-            kop.append(f'fase 3: koers {correctie:+.0f}° gecorrigeerd na '
-                       f'{stijging:+.1f} dB')
-            melden('naderen',
-                   f'Fase 3/5 — RSSI stijgt niet ({stijging:+.1f} dB), '
-                   f'koers {correctie:+.0f}° bijgesteld', fase=3)
-        else:
-            kop.append(f'fase 3: maximum van {MAX_NADERINGSSTAPPEN} stappen bereikt')
-
-        if laatste_punt is None:
-            naar_huis('Nadering gaf geen meetpunt')
-            return
-
-        # ================================================
-        # FASE 4 — OVERVLIEGEN
-        # ================================================
+        # Eén doorlopende, langzame vlucht in de bevestigde richting, met
+        # continue meting. Geen stappen en geen koerscorrectie meer: zie de
+        # toelichting bij DOORVLIEG_MAX_M. De yaw wordt vóór het loggen
+        # uitgedraaid, anders meet de eerste helft van de reeks de draai.
         if accu_op():
             naar_huis(f"Batterij {status.get('battery_percent')}%")
             return
 
-        pass_afstand = SATURATIE_AFSTAND_M + PASS_VOORBIJ_M
-        melden('overvliegen',
-               f'Fase 4/5 — overvliegen: {pass_afstand:.0f} m op '
-               f'{PASS_SNELHEID_CMS / 100:.1f} m/s', fase=4)
-
-        if not kondig_richting_aan(
-                4, bearing, pass_afstand,
-                f'overvliegen — beacon geschat op {SATURATIE_AFSTAND_M:.0f} m'):
-            afbreken_door_piloot(); return
+        melden('doorvliegen',
+               f'Fase 3/5 — doorvliegen op {bearing:.0f}° '
+               f'({PASS_SNELHEID_CMS / 100:.1f} m/s, max {DOORVLIEG_MAX_M:.0f} m)',
+               fase=3)
 
         _cmd_set_param(get_mav, mavutil, 'WPNAV_SPEED', PASS_SNELHEID_CMS)
         snelheid_aangepast = True
         if not pattern._wacht(1.0, status):
             afbreken_door_piloot(); return
 
-        pass_start_lat = status.get('gps_lat', 0.0)
-        pass_start_lon = status.get('gps_lon', 0.0)
-        dn, de = _noord_oost(bearing, pass_afstand)
-        _cmd_positie_offset(get_mav, mavutil, dn, de, bearing)
-
-        def doel_bereikt():
-            return approach._horizontale_afstand(
-                status.get('gps_lat', 0.0), status.get('gps_lon', 0.0),
-                pass_start_lat, pass_start_lon) >= pass_afstand * 0.95
-
-        # Ruime timeout: de pass MOET voltooien, want de instort komt
-        # achteraf uit de log. Halverwege afbreken levert niets bruikbaars.
-        pass_timeout = pass_afstand / (PASS_SNELHEID_CMS / 100.0) * 2.0 + 10.0
-        pass_begin = len(samples)
-        afgebroken, aantal_pass = _log_continu(
-            status, pass_timeout, 'overvliegen', samples, klaar_fn=doel_bereikt)
+        afgebroken, heen_samples, heen_m = _doorvliegen(
+            status, get_mav, mavutil, bearing, DOORVLIEG_MAX_M,
+            3, 'doorvliegen', samples, melden, kondig_richting_aan)
         if afgebroken:
             afbreken_door_piloot(); return
 
-        gevonden = _zoek_instort(samples[pass_begin:])
-        kop.append(f'fase 4: {aantal_pass} packets tijdens de pass')
+        instort_heen = _zoek_instort(heen_samples)
+        kop.append(f'fase 3: doorgevlogen {heen_m:.1f} m, '
+                   f'{len(heen_samples)} packets')
+        if instort_heen:
+            kop.append(f'fase 3: heenweg — {instort_heen[3]}')
+
+        # ================================================
+        # FASE 4 — TERUGKRUISING
+        # ================================================
+        # Dezelfde lijn terug. Twee kruisingen uit tegengestelde richting
+        # heffen een systematische meetvertraging op; zie TERUGKRUISING.
+        # De terugweg is bovendien grotendeels de thuisreis.
+        instort_terug = None
+        if TERUGKRUISING and not accu_op():
+            terug_bearing = (bearing + 180.0) % 360.0
+            terug_max = min(DOORVLIEG_MAX_M, heen_m + DOORVLIEG_VOORBIJ_M)
+            melden('terugkruisen',
+                   f'Fase 4/5 — terugkruising op {terug_bearing:.0f}° '
+                   f'(max {terug_max:.0f} m)', fase=4)
+
+            afgebroken, terug_samples, terug_m = _doorvliegen(
+                status, get_mav, mavutil, terug_bearing, terug_max,
+                4, 'terugkruisen', samples, melden, kondig_richting_aan)
+            if afgebroken:
+                afbreken_door_piloot(); return
+
+            instort_terug = _zoek_instort(terug_samples)
+            kop.append(f'fase 4: teruggekruist {terug_m:.1f} m, '
+                       f'{len(terug_samples)} packets')
+            if instort_terug:
+                kop.append(f'fase 4: terugweg — {instort_terug[3]}')
+        elif accu_op():
+            kop.append(f'fase 4: terugkruising overgeslagen, batterij '
+                       f'{status.get("battery_percent")}%')
+
+        gevonden = _combineer_instorten(instort_heen, instort_terug)
         if gevonden:
-            kop.append(f'fase 4: {gevonden[3]}')
+            kop.append(f'resultaat: {gevonden[3]}')
 
         # ================================================
         # FASE 5 — AFRONDEN
