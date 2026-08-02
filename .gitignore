@@ -23,3 +23,4 @@ data/dataflash/*.bin
 # LET OP: GEEN blanket *.csv meer. De meet-CSV's (pattern_*, approach_*) in
 # data/ zijn onderzoeksdata die de thesis onderbouwt — klein en waardevol, en
 # horen JUIST in git. Het oude '*.csv' negeerde precies die bestanden.
+LOGS/

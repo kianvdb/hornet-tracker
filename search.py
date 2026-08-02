@@ -119,9 +119,10 @@ PEIL_METINGEN_PER_HOEK = pattern.METINGEN_PER_HOEK   # 5 packets per hoek
 # nog uitzwaaiende drone meet zijn eigen beweging mee.
 SETTLE_NA_PEILSTAP_S = 1.5
 
-# Ruim boven de 1,5 s die 30° kost bij pattern.YAW_RATE_DPS (20°/s), met
-# marge voor wind en de eerste (mogelijk grotere) draai naar het raster.
-PEIL_HEADING_TIMEOUT_S = 10.0
+# Met de kortste draairichting (_cmd_yaw_kortste) is 180° de grootst
+# mogelijke draai; bij pattern.YAW_RATE_DPS (20°/s) is dat 9 s. 15 s laat
+# marge voor wind en voor het aanzetten en afremmen.
+PEIL_HEADING_TIMEOUT_S = 15.0
 
 # Onder dit aantal hoeken mét packets is de peiling niet te vertrouwen: dan
 # heeft de beacon te vaak gezwegen om een richting uit te halen. Doorvliegen
@@ -495,14 +496,16 @@ def _draai_naar(status, get_mav, mavutil, doel_graden):
     en elke kandidaat zou "bevestigd" worden, ook een reflectie. Eerst
     draaien, laten uitzweven, en dan pas de nulmeting.
 
-    Hergebruikt pattern._cmd_yaw_absoluut: absoluut en niet relatief, zodat
-    de fout zich niet opstapelt over meerdere kandidaten.
+    Gebruikt _cmd_yaw_kortste: absoluut (geen opstapelende fout over
+    meerdere kandidaten) en via de kortste weg, zodat een draai nooit bijna
+    een volle omwenteling wordt en in zijn timeout loopt.
 
     Returns (bereikt, afgebroken_door_piloot). Een niet-gehaalde hoek is geen
     reden om te stoppen — we meten dan op de hoek waar hij staat, en die
     staat in de log.
     """
-    pattern._cmd_yaw_absoluut(get_mav, mavutil, doel_graden)
+    _cmd_yaw_kortste(get_mav, mavutil, doel_graden,
+                     status.get('heading', 0.0))
     einde = time.time() + DRAAI_TIMEOUT_S
     while time.time() < einde:
         if pattern._pilot_has_taken_over(status):
@@ -512,6 +515,43 @@ def _draai_naar(status, get_mav, mavutil, doel_graden):
             return True, False
         time.sleep(0.1)
     return False, False
+
+
+def _cmd_yaw_kortste(get_mav, mavutil, doel_graden, huidige_graden):
+    """
+    Draai naar een absolute kompasrichting via de KORTSTE weg.
+
+    pattern._cmd_yaw_absoluut heeft de richting hardgecodeerd op "met de klok
+    mee". Voor pattern.py is dat onschadelijk — die loopt in stappen van +10°
+    altijd vooruit. Voor de peiling hier is het dat niet: de eerste rasterhoek
+    ligt willekeurig t.o.v. de stand na het opstijgen, en dan kan "met de klok
+    mee" een draai van bijna 360° betekenen.
+
+    Wat dat aanrichtte, op alle drie de veldvluchten hetzelfde: de eerste
+    stap haalde zijn hoek niet binnen de timeout en werd MIDDEN IN DE DRAAI
+    gemeten (commando 0°, gemeten op 71°, 92° en 75°). Tijdens die vijf
+    packets draait de drone 60° door, dus die meetwaarde hoort bij geen
+    enkele hoek in het bijzonder — precies het probleem dat stapsgewijs
+    meten moest wegnemen.
+
+    We rekenen de richting zelf uit en geven hem expliciet mee (+1 of -1) in
+    plaats van 0 ("kortste") aan de firmware over te laten: dan hangt het
+    gedrag niet af van hoe deze ArduCopter-versie param3 interpreteert.
+    """
+    mav = get_mav()
+    if mav is None:
+        return False
+    verschil = ((doel_graden - huidige_graden + 180) % 360) - 180
+    richting = 1 if verschil >= 0 else -1
+    mav.mav.command_long_send(
+        mav.target_system, mav.target_component,
+        mavutil.mavlink.MAV_CMD_CONDITION_YAW, 0,
+        float(doel_graden % 360),
+        float(pattern.YAW_RATE_DPS),
+        richting,
+        0,                 # 0 = absolute hoek
+        0, 0, 0)
+    return True
 
 
 def _log_continu(status, duur_s, fase, samples, klaar_fn=None):
@@ -661,7 +701,7 @@ def _peil_stapsgewijs(status, get_mav, mavutil, samples, melden):
                f'Fase 1/5 — peilen: hoek {doel}° '
                f'({stap}/{PEIL_AANTAL_STAPPEN})', fase=1)
 
-        pattern._cmd_yaw_absoluut(get_mav, mavutil, doel)
+        _cmd_yaw_kortste(get_mav, mavutil, doel, status.get('heading', 0.0))
         einde = time.time() + PEIL_HEADING_TIMEOUT_S
         bereikt = False
         while time.time() < einde:
@@ -673,9 +713,15 @@ def _peil_stapsgewijs(status, get_mav, mavutil, samples, melden):
                 break
             time.sleep(0.1)
         if not bereikt:
+            # NIET meten. Een meting midden in een draai smeert vijf packets
+            # uit over ~60° heading en hoort dus bij geen enkele hoek. Een
+            # gat in het diagram is eerlijker dan een vervuild punt; het
+            # zwaartepunt kan tegen een ontbrekende hoek, niet tegen een
+            # verkeerd gelabelde.
             print(f"[search] hoek {doel}° niet gehaald binnen "
-                  f"{PEIL_HEADING_TIMEOUT_S:.0f}s — meet op "
-                  f"{status.get('heading', 0.0):.1f}°")
+                  f"{PEIL_HEADING_TIMEOUT_S:.0f}s (staat op "
+                  f"{status.get('heading', 0.0):.1f}°) — hoek OVERGESLAGEN")
+            continue
 
         if not pattern._wacht(SETTLE_NA_PEILSTAP_S, status):
             return metingen, True, ''
@@ -939,42 +985,6 @@ def _doorvliegen(status, get_mav, mavutil, bearing, max_m, fase, naam,
     return afgebroken, samples[begin:], weg
 
 
-def _combineer_instorten(heen, terug):
-    """
-    Voeg de instort van de heenweg en die van de terugkruising samen.
-
-    Het middelpunt van twee kruisingen uit tegengestelde richting is vrij van
-    elke systematische vertraging in de meetketen — zie de toelichting bij
-    TERUGKRUISING. Vandaar dat twee kruisingen samen betrouwbaarder zijn dan
-    de beste van de twee afzonderlijk.
-
-    Returns (lat, lon, betrouwbaarheid, uitleg) of None.
-    """
-    goed = [r for r in (heen, terug) if r is not None]
-    if not goed:
-        return None
-    if len(goed) == 1:
-        lat, lon, zeker, uitleg = goed[0]
-        return (lat, lon, zeker, f'één kruising: {uitleg}')
-
-    (la, loa, za, ua), (lb, lob, zb, ub) = goed
-    spreiding = approach._horizontale_afstand(la, loa, lb, lob)
-    lat, lon = (la + lb) / 2.0, (loa + lob) / 2.0
-
-    # Twee kruisingen die ver uit elkaar liggen, meten niet hetzelfde. Dan is
-    # het middelpunt geen verbetering maar een verzinsel.
-    if spreiding > 2 * INSTORT_VENSTER_M:
-        beste = goed[0] if za == 'hoog' else goed[-1]
-        return (beste[0], beste[1], 'laag',
-                f'kruisingen {spreiding:.1f} m uit elkaar — niet gemiddeld; '
-                f'{beste[3]}')
-
-    zeker = 'hoog' if (za == 'hoog' and zb == 'hoog') else 'midden'
-    return (lat, lon, zeker,
-            f'middelpunt van twee kruisingen ({spreiding:.1f} m uit elkaar); '
-            f'heen: {ua}; terug: {ub}')
-
-
 def _zoek_instort(pass_samples):
     """
     Haal het passeermoment achteraf uit de gelogde pass.
@@ -993,8 +1003,10 @@ def _zoek_instort(pass_samples):
       midden - een zwakkere maar echte daling: we passeerden er lateraal naast
       laag   - geen daling: terugval op het punt met de hoogste RSSI (§5)
 
-    Returns (lat, lon, betrouwbaarheid, uitleg) of None als er geen bruikbare
-    samples zijn.
+    Returns (lat, lon, betrouwbaarheid, uitleg, methode) of None als er geen
+    bruikbare samples zijn. methode is 'instort' of 'rssi' — dat laatste is de
+    terugval. _combineer_instorten gebruikt het om te weten hoe hard de twee
+    kruisingen onderling vergelijkbaar zijn.
     """
     g = [s for s in pass_samples if s.get('rssi') is not None]
     if len(g) < 2:
@@ -1022,7 +1034,7 @@ def _zoek_instort(pass_samples):
         return (top['lat'], top['lon'], 'laag',
                 f"geen instort gevonden (steilste {steilste:.1f} dB over "
                 f"{INSTORT_VENSTER_M:.0f} m); positie = sterkste RSSI "
-                f"{top['rssi']:.0f} dBm")
+                f"{top['rssi']:.0f} dBm", 'rssi')
 
     daling, i, j = beste
     betrouwbaarheid = 'hoog' if daling >= INSTORT_DALING_DB else 'midden'
@@ -1041,12 +1053,56 @@ def _zoek_instort(pass_samples):
             break
 
     return (lat, lon, betrouwbaarheid,
-            f"instort {daling:.1f} dB over {afstand[j] - afstand[i]:.1f} m")
+            f"instort {daling:.1f} dB over {afstand[j] - afstand[i]:.1f} m",
+            'instort')
 
 
-# ============================================
-# UITVOER
-# ============================================
+def _combineer_instorten(heen, terug):
+    """
+    Voeg de instort van de heenweg en die van de terugkruising samen.
+
+    ALTIJD middelen, ook als de twee ver uit elkaar liggen. Beide kruisingen
+    meten dezelfde beacon, dus het gemiddelde van twee ruizige schattingen is
+    beter dan er willekeurig één kiezen — en bij de instort-methode heft het
+    middelpunt bovendien de systematische vertraging op (zie TERUGKRUISING).
+
+    Dat was eerst anders: bij meer dan 6 m verschil weigerde deze functie te
+    middelen en koos ze er één. Op de vlucht van 2-8 19:12 pakte dat slecht
+    uit — de twee schattingen lagen 8,0 m uit elkaar, maar hun middelpunt lag
+    3,7 m van de beacon terwijl de gekozen enkeling er 5,2 m naast zat. De
+    spreiding is informatie over de ONZEKERHEID, geen reden om data weg te
+    gooien; hij bepaalt daarom de betrouwbaarheid en niet of we middelen.
+
+    Returns (lat, lon, betrouwbaarheid, uitleg, methode) of None.
+    """
+    goed = [r for r in (heen, terug) if r is not None]
+    if not goed:
+        return None
+    if len(goed) == 1:
+        lat, lon, zeker, uitleg, methode = goed[0]
+        return (lat, lon, zeker, f'één kruising: {uitleg}', methode)
+
+    (la, loa, za, ua, ma), (lb, lob, zb, ub, mb) = goed
+    spreiding = approach._horizontale_afstand(la, loa, lb, lob)
+    lat, lon = (la + lb) / 2.0, (loa + lob) / 2.0
+
+    # Betrouwbaarheid uit twee dingen: hoe dicht de kruisingen bij elkaar
+    # liggen, en of ze allebei een echte instort zagen of terugvielen op het
+    # sterkste RSSI-punt.
+    beide_instort = (ma == 'instort' and mb == 'instort')
+    if beide_instort and spreiding <= INSTORT_VENSTER_M:
+        zeker = 'hoog'
+    elif spreiding <= 2 * INSTORT_VENSTER_M:
+        zeker = 'midden'
+    else:
+        zeker = 'laag'
+
+    methode = 'instort' if beide_instort else 'gemengd'
+    return (lat, lon, zeker,
+            f'middelpunt van twee kruisingen, {spreiding:.1f} m uit elkaar '
+            f'(heen [{ma}]: {ua}; terug [{mb}]: {ub})',
+            methode)
+
 
 def _schrijf_csv(samples, stempel, hoogte, start_gps, kop):
     """
@@ -1513,7 +1569,7 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
 
         melding = ''
         if gevonden:
-            lat, lon, betrouwbaarheid, uitleg = gevonden
+            lat, lon, betrouwbaarheid, uitleg = gevonden[:4]
             melding = (f'beacon op {lat:.7f}, {lon:.7f} '
                        f'(betrouwbaarheid {betrouwbaarheid})')
             print(f"[search] --- Resultaat ---")
