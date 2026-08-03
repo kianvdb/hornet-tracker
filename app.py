@@ -138,6 +138,11 @@ status = {
     'telem_noise_local': 0, 'telem_noise_remote': 0,
     'telem_quality': 0, 'telem_txbuf': 0,
 
+    # Toestandsbewaking van het toestel (VIBRATION / SERVO_OUTPUT_RAW).
+    # Gebruikt door de hovertest in search.py; -1 = nog niets ontvangen.
+    'vibe_x': -1.0, 'vibe_y': -1.0, 'vibe_z': -1.0, 'vibe_clip': 0,
+    'motor_pwm': [],
+
 # LoRa-specifieke velden (stub voor toekomst)
     'lora_packet_count': 0,
     'lora_last_tracker_id': 0,
@@ -1170,6 +1175,23 @@ def mavlink_loop():
                     status['altitude'] = round(msg.relative_alt / 1000.0, 2)
                     if msg.hdg != 65535:
                         status['heading'] = round(msg.hdg / 100.0, 1)
+                elif msg_type == 'VIBRATION':
+                    # Trillingsniveau per as, plus de clipping-tellers van de
+                    # accelerometers. ArduPilot-richtlijn: < 30 goed, 30-60
+                    # twijfelachtig, > 60 een probleem. Wordt gebruikt door de
+                    # hovertest in search.py.
+                    status['vibe_x'] = round(msg.vibration_x, 1)
+                    status['vibe_y'] = round(msg.vibration_y, 1)
+                    status['vibe_z'] = round(msg.vibration_z, 1)
+                    status['vibe_clip'] = (msg.clipping_0 + msg.clipping_1
+                                           + msg.clipping_2)
+                elif msg_type == 'SERVO_OUTPUT_RAW':
+                    # PWM naar de vier motoren. Het VERSCHIL tussen de motoren
+                    # bij stilhangen zegt of het toestel in balans is: een
+                    # gezonde quad zit binnen enkele tientallen PWM, en op de
+                    # vlucht die eindigde in een val stond er 103 PWM tussen.
+                    status['motor_pwm'] = [msg.servo1_raw, msg.servo2_raw,
+                                           msg.servo3_raw, msg.servo4_raw]
                 elif msg_type in ('RADIO_STATUS', 'RADIO'):
                     last_radio_status = now
                     status['telem_connected'] = True

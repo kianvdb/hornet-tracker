@@ -83,6 +83,118 @@ import pattern
 
 
 # ============================================
+# HOVERTEST — toestandscontrole vóór het zoeken
+# ============================================
+#
+# Waarom deze test bestaat: op 2-8 21:26 viel de drone recht naar beneden na
+# de richtingbepaling. Uit het .BIN bleek een mechanische oorzaak — de
+# trilling schoot van 26 naar 68 in vier tienden van een seconde, en pas
+# DAARNA liep de stand weg. De EKF- en kompasmeldingen in de log kwamen 1,5
+# tot 3 s later en waren gevolg, geen oorzaak.
+#
+# Wat er al vóór de val zichtbaar was: de vier motoren stonden 103 PWM uit
+# elkaar tijdens rustig stilhangen (1623 / 1708 / 1725 / 1626). Een quad in
+# balans zit binnen enkele tientallen. Die scheefstand stond in de log van
+# minuut één — alleen keek er niemand naar vóór de vlucht.
+#
+# Deze test hangt dus even stil op zoekhoogte, leest wat de vluchtcontroller
+# zelf al meet, en gaat alleen door als het klopt. Kosten: een paar seconden
+# die je toch al aan uitzweven kwijt bent.
+#
+# DE DREMPELS ZIJN VOORLOPIG. De .BIN-logs van de gezonde vluchten zijn niet
+# meer beschikbaar, dus ze staan nu ruim: ze vangen een duidelijk defect,
+# niet een beginnende scheefstand. Elke vlucht schrijft de gemeten waarden in
+# de CSV-kop; met een paar gezonde vluchten erbij kunnen ze strakker.
+
+HOVERTEST_DUUR_S = 5.0        # meetvenster; lang genoeg voor ~20 monsters op 4 Hz
+
+# ArduPilot-richtlijn: < 30 goed, 30-60 twijfelachtig, > 60 probleem.
+# Bij de val stond hij op 26 vlak vóór het defect en piekte op 114.
+HOVERTEST_VIBE_WAARSCHUWING = 30.0
+HOVERTEST_VIBE_MAX          = 60.0
+
+# Verschil tussen de hardst en zachtst draaiende motor bij stilhangen.
+# Bij de val: 103 PWM. Een toestel in balans haalt dat bij lange na niet.
+HOVERTEST_MOTOR_WAARSCHUWING = 80
+HOVERTEST_MOTOR_MAX          = 150
+
+# Clipping betekent dat de versnellingsmeter zijn bereik raakt: dan is de
+# hoogte- en standschatting niet meer te vertrouwen. Nul is de enige
+# acceptabele waarde bij stilhangen.
+HOVERTEST_CLIP_MAX = 0
+
+
+def _hovertest(status, duur_s=None):
+    """
+    Hang stil en lees de toestandsbewaking van de vluchtcontroller uit.
+
+    Meet trilling (VIBRATION) en de spreiding tussen de vier motoren
+    (SERVO_OUTPUT_RAW) over een venster. Beide komen uit de Pixhawk zelf; we
+    voegen niets toe, we kijken alleen naar wat er toch al gemeten wordt.
+
+    Returns (in_orde, oordeel_tekst, metingen_dict). Ontbreekt de telemetrie
+    (oudere firmware, stream niet actief), dan is in_orde True met een
+    melding dat er niet gemeten kon worden — een ontbrekende sensor mag geen
+    vlucht blokkeren, maar moet wel opvallen in de log.
+    """
+    duur = HOVERTEST_DUUR_S if duur_s is None else duur_s
+    vibes, spreidingen = [], []
+    clip_begin = status.get('vibe_clip', 0)
+
+    einde = time.time() + duur
+    while time.time() < einde:
+        if pattern._pilot_has_taken_over(status):
+            return False, 'piloot nam over tijdens de hovertest', {}
+        vx = status.get('vibe_x', -1.0)
+        if vx >= 0:
+            vibes.append(max(vx, status.get('vibe_y', 0.0),
+                             status.get('vibe_z', 0.0)))
+        pwm = status.get('motor_pwm') or []
+        if len(pwm) >= 4 and min(pwm[:4]) > 0:
+            spreidingen.append(max(pwm[:4]) - min(pwm[:4]))
+        time.sleep(0.1)
+
+    clip = status.get('vibe_clip', 0) - clip_begin
+    meting = {
+        'vibe_max': round(max(vibes), 1) if vibes else None,
+        'vibe_gem': round(statistics.mean(vibes), 1) if vibes else None,
+        'motor_spreiding': round(statistics.median(spreidingen)) if spreidingen else None,
+        'clip': clip,
+        'n': len(vibes),
+    }
+
+    if not vibes and not spreidingen:
+        return True, ('geen toestandstelemetrie ontvangen — hovertest '
+                      'overgeslagen'), meting
+
+    redenen = []
+    if meting['vibe_max'] is not None and meting['vibe_max'] > HOVERTEST_VIBE_MAX:
+        redenen.append(f"trilling {meting['vibe_max']:.0f} > {HOVERTEST_VIBE_MAX:.0f}")
+    if (meting['motor_spreiding'] is not None
+            and meting['motor_spreiding'] > HOVERTEST_MOTOR_MAX):
+        redenen.append(f"motoren {meting['motor_spreiding']} PWM uit elkaar "
+                       f"> {HOVERTEST_MOTOR_MAX}")
+    if clip > HOVERTEST_CLIP_MAX:
+        redenen.append(f'{clip} keer clipping op de versnellingsmeter')
+
+    tekst = (f"trilling max {meting['vibe_max']}, gem {meting['vibe_gem']}; "
+             f"motoren {meting['motor_spreiding']} PWM uit elkaar; "
+             f"clipping {clip}")
+    if redenen:
+        return False, tekst + ' -> AFGEKEURD: ' + ', '.join(redenen), meting
+
+    let_op = []
+    if meting['vibe_max'] is not None and meting['vibe_max'] > HOVERTEST_VIBE_WAARSCHUWING:
+        let_op.append('trilling verhoogd')
+    if (meting['motor_spreiding'] is not None
+            and meting['motor_spreiding'] > HOVERTEST_MOTOR_WAARSCHUWING):
+        let_op.append('motoren staan scheef')
+    if let_op:
+        tekst += ' -> let op: ' + ', '.join(let_op)
+    return True, tekst, meting
+
+
+# ============================================
 # FASE 1 — PEILEN
 # ============================================
 
@@ -296,6 +408,10 @@ YAW_SETTLE_VOOR_PASS_S = 3.0
 # en dat kost accu.
 PASS_SNELHEID_CMS      = 50.0
 STANDAARD_SNELHEID_CMS = 100.0
+
+# RTL_ALT uit de paramdump (500 cm = 5 m). Tijdens fase 5 zetten we hem
+# tijdelijk op de zoekhoogte zodat de drone niet eerst klimt.
+STANDAARD_RTL_ALT_CM = 500.0
 
 # Instort-detectie. De doc noemt ">5 dB daling over <2 m", maar in de
 # naderingsmeting (log 165) haalt geen enkel 2 m-venster dat: 15->17 m is
@@ -1177,6 +1293,7 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
     start_gps = (0.0, 0.0)
     gevonden = None       # (lat, lon, betrouwbaarheid, uitleg)
     snelheid_aangepast = False
+    rtl_alt_aangepast = False
     afbreekreden = []     # lijst zodat de geneste helper hem kan vullen
 
     def melden(step, message, active=True, **extra):
@@ -1291,6 +1408,26 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
             time.sleep(0.3)
         if not pattern._wacht(SETTLE_NA_KLIM_S, status):
             afbreken_door_piloot(); return
+
+        # ---- hovertest: deugt het toestel? ----
+        # Nu, op zoekhoogte en boven het opstijgpunt: deugt het niet, dan
+        # landen we waar we staan zonder ook maar één meter te vliegen.
+        melden('hovertest', 'Toestandscontrole — stilhangen en meten...')
+        gezond, oordeel, hovermeting = _hovertest(status)
+        kop.append(f'hovertest: {oordeel}')
+        print(f'[search] hovertest: {oordeel}')
+        if not gezond:
+            if pattern._pilot_has_taken_over(status):
+                afbreken_door_piloot(); return
+            # LAND en niet RTL: we staan nog boven het opstijgpunt, en bij een
+            # mechanisch probleem is recht naar beneden op de bekende plek
+            # veiliger dan eerst ergens heen vliegen.
+            afbreekreden.append(f'Hovertest afgekeurd — {oordeel}')
+            melden('landen', f'Hovertest afgekeurd — {oordeel} — LANDEN',
+                   fase=0)
+            mission._cmd_land(get_mav, mavutil)
+            return
+        melden('hovertest', f'Toestand OK — {oordeel}')
 
         # ================================================
         # FASE 1 — PEILEN
@@ -1527,12 +1664,25 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
         _cmd_set_param(get_mav, mavutil, 'WPNAV_SPEED', STANDAARD_SNELHEID_CMS)
         snelheid_aangepast = False
 
+        # RTL op ZOEKHOOGTE in plaats van eerst klimmen naar RTL_ALT (5 m).
+        # Er is niets te winnen met hoogte op de terugweg: de drone komt van
+        # een punt dat hij zelf net overvlogen heeft, dus de route is vrij.
+        # Lager terugkomen scheelt accu en beperkt de val als er onderweg
+        # alsnog iets bezwijkt. We zetten RTL_ALT op de zoekhoogte en niet op
+        # 0 ("huidige hoogte"): mocht het terugzetten in het finally-blok
+        # mislukken, dan klimt een RTL van de piloot nog altijd naar 2,5 m in
+        # plaats van vlak over de grond terug te vliegen.
+        _cmd_set_param(get_mav, mavutil, 'RTL_ALT', hoogte * 100.0)
+        rtl_alt_aangepast = True
+        if not pattern._wacht(0.5, status):
+            afbreken_door_piloot(); return
+
         if gevonden:
             melden('rtl', f'Fase 5/5 — beacon gevonden ({gevonden[2]}) — '
-                          f'RTL naar opstijgpunt', fase=5)
+                          f'terug naar opstijgpunt op {hoogte} m', fase=5)
         else:
-            melden('rtl', 'Fase 5/5 — geen positie bepaald — '
-                          'RTL naar opstijgpunt', fase=5)
+            melden('rtl', f'Fase 5/5 — geen positie bepaald — '
+                          f'terug naar opstijgpunt op {hoogte} m', fase=5)
         approach._cmd_rtl(get_mav)
 
     except Exception as e:
@@ -1556,13 +1706,17 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
         # primair": het zet alleen een instelling terug. Zou hij op 0,5 m/s
         # blijven staan, dan vliegt ook de RTL van de piloot half zo snel, en
         # dat kost precies de accu die hij dan nodig heeft.
-        if snelheid_aangepast:
+        if snelheid_aangepast or rtl_alt_aangepast:
             try:
                 from pymavlink import mavutil as _mavutil
-                _cmd_set_param(get_mav, _mavutil, 'WPNAV_SPEED',
-                               STANDAARD_SNELHEID_CMS)
+                if snelheid_aangepast:
+                    _cmd_set_param(get_mav, _mavutil, 'WPNAV_SPEED',
+                                   STANDAARD_SNELHEID_CMS)
+                if rtl_alt_aangepast:
+                    _cmd_set_param(get_mav, _mavutil, 'RTL_ALT',
+                                   STANDAARD_RTL_ALT_CM)
             except Exception as e:
-                print(f"[search] WPNAV_SPEED terugzetten mislukt: {e}")
+                print(f"[search] parameters terugzetten mislukt: {e}")
 
         if samples:
             _schrijf_csv(samples, stempel, hoogte, start_gps, kop)
