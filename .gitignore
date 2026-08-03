@@ -24,3 +24,5 @@ data/dataflash/*.bin
 # data/ zijn onderzoeksdata die de thesis onderbouwt — klein en waardevol, en
 # horen JUIST in git. Het oude '*.csv' negeerde precies die bestanden.
 LOGS/
+# Uitvoer van de testsuite (tests/test_*.py) — geen meetdata
+tests/uitvoer/

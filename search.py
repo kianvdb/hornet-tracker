@@ -1718,7 +1718,10 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
             except Exception as e:
                 print(f"[search] parameters terugzetten mislukt: {e}")
 
-        if samples:
+        # Ook wegschrijven als er geen meetpunten zijn maar wel een kop: een
+        # afgekeurde hovertest levert nul samples op, terwijl juist dán de
+        # gemeten trilling en motorspreiding bewaard moeten blijven.
+        if samples or kop:
             _schrijf_csv(samples, stempel, hoogte, start_gps, kop)
 
         melding = ''

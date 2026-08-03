@@ -44,7 +44,52 @@ omdat de plateau-piek 0,3 dB boven de beacon-richting lag, binnen de ruis.
 
 ---
 
-## 3. Het algoritme — 5 fasen
+## 3. Het algoritme — hovertest + 5 fasen
+
+### Fase 0 — Hovertest (toestandscontrole)
+Na het opstijgen, op zoekhoogte en nog boven het opstijgpunt: 5 s stilhangen
+en uitlezen wat de vluchtcontroller zelf al meet. Deugt het niet, dan **LAND**
+— hier, meteen, zonder één meter te vliegen. Bewust landen en niet RTL: bij
+een mechanisch probleem is recht naar beneden op een bekende plek veiliger
+dan eerst ergens heen vliegen.
+
+**Waarom deze fase bestaat.** Op 2-8 21:26 viel de drone recht naar beneden,
+vlak na de richtingbepaling. Uit het .BIN:
+
+```
+  t-4,6s   trilling 26    roll +1,6/+1,2   pitch -3,2/-3,4   rustige hover
+  t-4,4s   trilling 38    roll +1,6/+1,2   pitch -3,4/-4,1   trilling loopt op
+  t-4,0s   trilling 68    roll -0,6/+1,1   pitch -15,1/-12,0 stand loopt weg
+  t-3,4s   trilling 73    roll -91,6/+19,7                   op zijn kant
+  t 0      Crash: Disarming: AngErr=54>30, Accel=0,7<3,0
+```
+
+**De trilling gaat als eerste omhoog, pas daarna verliest de regeling het.**
+Motor C1 stond vastgepind op zijn minimum terwijl C4 op maximum stond en de
+hoogteregelaar 100% gas vroeg — verlies van stuwkracht aan één kant. De
+EKF- en kompasmeldingen in de log kwamen 1,5 tot 3 s later en waren gevolg,
+geen oorzaak: het magnetisch veld was vlak (502-521), GPS had 26-28
+satellieten met HDop 0,51, en de accu zakte alleen onder de 29,7 A belasting.
+
+Wat al vóór de val zichtbaar was: de vier motoren stonden **103 PWM uit
+elkaar** tijdens rustig stilhangen (1623 / 1708 / 1725 / 1626). Een quad in
+balans zit binnen enkele tientallen. Die scheefstand stond vanaf minuut één
+in de log — er keek alleen niemand naar.
+
+| grootheid | bron | waarschuwing | afkeuren |
+|---|---|---|---|
+| trilling (max X/Y/Z) | `VIBRATION` | > 30 | **> 60** |
+| spreiding tussen de 4 motoren | `SERVO_OUTPUT_RAW` | > 80 PWM | **> 150 PWM** |
+| clipping versnellingsmeter | `VIBRATION` | — | **elke toename** |
+
+De gemeten waarden gaan altijd de CSV-kop in, ook als de test slaagt.
+
+**De drempels zijn voorlopig en staan ruim.** De .BIN-logs van de gezonde
+vluchten zijn niet meer beschikbaar, dus ze zijn niet op eigen data
+gekalibreerd. Concreet: de crashvlucht zou er met 103 PWM **doorheen** zijn
+gekomen (wel met de melding "motoren staan scheef"); met de grens op 100 was
+hij afgekeurd. Na een paar gezonde vluchten kunnen ze strakker — de waarden
+in de CSV-kop zijn daarvoor bedoeld.
 
 ### Fase 1 — Peilen (STAPSGEWIJS, 12 × 30°)
 Draai naar de hoek, **stop**, laat uitzweven, meet 5 packets stilstaand,
@@ -225,10 +270,23 @@ te gooien; hij bepaalt daarom de betrouwbaarheid:
 | gemengd (instort + RSSI-terugval) | hoogstens midden |
 
 ### Fase 5 — Afronden
-RTL naar het opstijgpunt, + coördinaat-log-entry op de gevonden positie +
-dashboard-toast.
+Middelpunt van de twee kruisingen, terug naar het opstijgpunt, landen,
+coördinaat-log-entry en toast.
 
----
+**Terug op zoekhoogte, niet klimmend naar `RTL_ALT`.** Standaard klimt een
+RTL eerst naar 5 m. Dat levert niets op: de drone komt van een punt dat hij
+zelf net overvlogen heeft, dus die route is vrij. Lager terugkomen scheelt
+accu en beperkt de val als er onderweg alsnog iets bezwijkt. `RTL_ALT` gaat
+daarom vlak vóór de terugvlucht op de zoekhoogte en wordt in het
+`finally`-blok teruggezet op 500 cm.
+
+Bewust niet `RTL_ALT = 0` ("huidige hoogte"): mislukt het terugzetten, dan
+klimt een RTL van de piloot nog altijd naar de zoekhoogte in plaats van vlak
+over de grond terug te vliegen.
+
+De gevonden positie gaat server-side naar de coördinaat-log, met de
+betrouwbaarheid en de volledige onderbouwing in de notitie — zodat de
+verdelger ziet of hij naar een coördinaat kijkt of naar een richtinggever.
 
 ## 4. Parameters (met herkomst)
 
@@ -268,6 +326,11 @@ Overige parameters:
 | Instort zwak (nog bruikbaar) | 2 dB | steilste punt ligt dan nog dichter bij dan sterkste RSSI |
 | Navigatie | `LOCAL_OFFSET_NED` + vaste yaw | fout kost hooguit één stapgrootte, niet een duik |
 | Beacon-testfrequentie | 2 Hz (500 ms) | 10% duty bij ToA ~41 ms = max ~2,4 Hz |
+| Hovertest: duur | 5 s | ~20 monsters bij 4 Hz telemetrie |
+| Hovertest: trilling afkeuren | > 60 | ArduPilot-richtlijn; bij de val 26 vóór en 114 tijdens |
+| Hovertest: motoren afkeuren | > 150 PWM | bij de val 103 PWM tijdens rustig hangen |
+| Hovertest: clipping | elke toename | dan is de stand- en hoogteschatting onbetrouwbaar |
+| RTL-hoogte fase 5 | = zoekhoogte | geen klim naar 5 m; teruggezet op 500 cm in `finally` |
 
 **Bevestigde Pixhawk-params (uit log 165 / paramdump):** `WPNAV_SPEED=100`
 (1 m/s), `WPNAV_SPEED_UP/DN=50`, `RTL_ALT=500` (5 m), `GUID_TIMEOUT=3.0`,
@@ -282,6 +345,9 @@ statusmelding die de reden noemt. **Nooit onbepaald LOITER** — dat verbrandt d
 harde accugrens. De zender-override blijft altijd primair (mode ≠ GUIDED =
 onmiddellijk stoppen, zoals in mission.py/pattern.py/approach.py).
 
+- **Hovertest afgekeurd** → LAND op het opstijgpunt, met de gemeten waarden
+  in de melding. Niet RTL: bij een mechanisch probleem wil je niet eerst
+  ergens heen vliegen.
 - **Alle kandidaten verworpen** → RTL, meld welke bearings geprobeerd zijn.
 - **RSSI stijgt nooit bij naderen** → je loopt niet naar een echte bron → stop, RTL.
 - **Instort niet gevonden in de pass** → pass voltooit toch; log het beste-RSSI-punt
@@ -297,6 +363,7 @@ huidige opzet bij een beacon op ~18 m en één rake kandidaat:
 | Post | Tijd |
 |---|---|
 | Takeoff + settle + arm | ~15 s |
+| Fase 0 hovertest | ~5 s |
 | Fase 1 peilen (12 × 30°, bij 33% pakketverlies) | ~93 s |
 | Fase 2 richtdraai + 2 metingen | ~12 s |
 | Fase 2 verificatiestap 10 m @ 1 m/s | ~10 s |
@@ -306,9 +373,9 @@ huidige opzet bij een beacon op ~18 m en één rake kandidaat:
 | Fase 4 terugkruising ~12 m @ 0,5 m/s | ~24 s |
 | Fase 5 RTL + landen | ~30 s |
 | Aankondigingen op de kaart (4 × 1,5 s) | ~6 s |
-| **Totaal** | **~238 s = 4,0 min** |
+| **Totaal** | **~243 s = 4,1 min** |
 
-Marge tot 5,0 min: **62 s**. Tot 4,5 min: 32 s.
+Marge tot 5,0 min: **57 s**. Tot 4,5 min: 27 s. De hovertest kost 5 s en kan een hele vlucht besparen; de RTL op zoekhoogte wint een deel daarvan terug doordat er niet eerst geklommen wordt.
 
 Werkelijke veldvluchten ter controle: 2-8 17:18 was 221 s toen de piloot
 overnam en had nog ~85 s te gaan (zou over de grens zijn gegaan met de oude,
@@ -345,6 +412,11 @@ Eigen commando-helpers in search.py:
 vluchten waarbij de instort achteraf uit de reeks komt en de GPS-positie
 leidend is, niet de hoek. Fase 1 gebruikte dit ook en dat was fout — zie §3.
 Gebruik die helper niet opnieuw voor een peiling.
+
+Nieuwe telemetrie in app.py voor de hovertest: `VIBRATION` vult
+`status['vibe_x/y/z']` en `status['vibe_clip']`, `SERVO_OUTPUT_RAW` vult
+`status['motor_pwm']`. Beide komen mee met `MAV_DATA_STREAM_ALL` op 4 Hz;
+er wordt niets extra aangevraagd. Geverifieerd dat ze live binnenkomen.
 
 Dashboard: `START MISSIE` → socket-event `start_mission` → `search.start_search`.
 Voortgang via `meting_update` naar `#mission-status`. De gevonden positie
@@ -401,6 +473,22 @@ bij 5 packets) daar ~5° van verklaart; de rest zit in het patroon zelf.
 Meer packets per hoek helpt dus maar tot ~2,7° en kost lineair vliegtijd.
 De echte winst zit in een smallere lob — zie het link-tekort hierboven.
 
+### Mechanische toestand van het toestel
+De val van 2-8 21:26 was mechanisch, geen software (zie fase 0). Het toestel
+is daarna opgelapt: de ongebruikte telemetriemodule (rechtsachter) is
+verwijderd, de voedingsmodule staat gecentreerder en de accu is naar voren
+geschoven — alle drie tegen de scheefstand die de log liet zien, waarbij de
+diagonaal linksvoor/linksachter structureel harder werkte.
+
+Wat de hovertest niet uitsluit: een propeller met een haarscheur of een losse
+motorschroef geven pas onder toerental problemen. Handmatig draaien sluit
+alleen een vastgelopen lager uit. De eerste vlucht na een reparatie is dus
+meteen de meting die zegt of het geholpen heeft — de waarden staan in de
+CSV-kop.
+
+Trillingen waren al vóór de val verhoogd: ~26 tegen 12-17 op eerdere
+vluchten.
+
 ### Overig
 - **Instort-scherpte bij een gladde pass** blijft de minst geverifieerde
   aanname. Op 19:12 gaf de heenweg 3,6 dB en de terugweg 1,7 dB bij een
@@ -425,3 +513,5 @@ De echte winst zit in een smallere lob — zie het link-tekort hierboven.
 | 2-8 17:18 | drone stond op 2,70 m van de beacon en vloog er 21 m vandaan; yaw draaide tijdens de pass en gaf een valse instort van 6 dB met betrouwbaarheid HOOG, 20,9 m naast de beacon | gradiënt-nadering vervangen door doorvliegen; yaw uitdraaien vóór het loggen |
 | 2-8 19:12 | eerste geslaagde volledige vlucht; twee kruisingen 8,0 m uit elkaar werden niet gemiddeld, terwijl het middelpunt beter was | altijd middelen, betrouwbaarheid uit de spreiding |
 | alle drie | eerste peilstap draaide bijna 360° de verkeerde kant op en werd midden in de draai gemeten | `_cmd_yaw_kortste`; niet-bereikte hoek wordt overgeslagen |
+| 2-8 21:26 | val na de richtingbepaling; mechanisch (trilling eerst, stand daarna), motoren stonden al 103 PWM scheef tijdens de hover | hovertest als fase 0; `VIBRATION` en `SERVO_OUTPUT_RAW` in de status-dict |
+| 2-8 21:26 | peiling 5,8° naast de beacon bij een 170° gedraaide geometrie — beste resultaat tot dan, op een onafhankelijke opstelling | bevestigt zwaartepunt + kortste-weg-draai |
