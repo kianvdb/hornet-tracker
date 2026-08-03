@@ -79,17 +79,62 @@ in de log — er keek alleen niemand naar.
 | grootheid | bron | waarschuwing | afkeuren |
 |---|---|---|---|
 | trilling (max X/Y/Z) | `VIBRATION` | > 30 | **> 60** |
-| spreiding tussen de 4 motoren | `SERVO_OUTPUT_RAW` | > 80 PWM | **> 150 PWM** |
+| spreiding tussen de 4 motoren | `SERVO_OUTPUT_RAW` | > 140 PWM | **> 200 PWM** |
 | clipping versnellingsmeter | `VIBRATION` | — | **elke toename** |
+| ongevraagde draai tijdens de klim | `GLOBAL_POSITION_INT` heading | > 15° | **> 30°** |
 
 De gemeten waarden gaan altijd de CSV-kop in, ook als de test slaagt.
 
-**De drempels zijn voorlopig en staan ruim.** De .BIN-logs van de gezonde
-vluchten zijn niet meer beschikbaar, dus ze zijn niet op eigen data
-gekalibreerd. Concreet: de crashvlucht zou er met 103 PWM **doorheen** zijn
-gekomen (wel met de melding "motoren staan scheef"); met de grens op 100 was
-hij afgekeurd. Na een paar gezonde vluchten kunnen ze strakker — de waarden
-in de CSV-kop zijn daarvoor bedoeld.
+**Basislijn van dít toestel**, gemeten over acht vluchten in een venster van
+30 s rustig hangen boven 1,5 m:
+
+| log | vlucht | spreiding | rol-as | trilling |
+|---|---|---|---|---|
+| 161 | 24-7 rotatie | 87 PWM | −79 | 18,4 |
+| 163 | 28-7 rotatie | 110 PWM | −92 | 20,9 |
+| 165 | 29-7 nadering | 94 PWM | −70 | 17,2 |
+| 166 | 1-8 zoek | 109 PWM | −90 | 32,2 |
+| 167 | 2-8 zoek | 97 PWM | −89 | 16,5 |
+| 169 | 2-8 zoek ok | 106 PWM | −94 | 19,0 |
+| 170 | 2-8 val | 124 PWM | −89 | 31,2 |
+| **176** | **3-8 na reparatie** | **422 PWM** | **+365** | **32,1** |
+
+**Deze quad hangt normaal op 87-124 PWM spreiding — ook op de zes geslaagde
+meetvluchten.** Een eerdere lezing dat de 103 PWM vóór de val al een
+waarschuwing was, klopte niet: dat is gewoon de basislijn, en een grens van
+80 zou elke vlucht uit dit project hebben tegengehouden.
+
+De vaste scheefstand zit in de **rol-as**: op alle zeven vluchten vóór de
+reparatie liep de linkerkant 70-94 PWM harder. Onschadelijke eigenschap van
+deze bouw. Op vlucht 176 klapte dat om naar +365 — de rechterkant vier keer
+zo hard, wat op zwaartepuntverschuiving wijst en niet op een motorstoring:
+de verandering zat vrijwel volledig in de rol-as (+454), tegen +44 in pitch
+en −11 in yaw. Eén haperende motor zou alle drie de assen raken.
+
+**Ongevraagde draai tijdens de klim** is een tweede, los verschijnsel. Op
+vlucht 176 draaide de drone 147° om zijn as tussen t=3 s en t=8 s, terwijl de
+zeven eerdere vluchten binnen 1-7° bleven:
+
+| log | 161 | 163 | 165 | 166 | 167 | 169 | 170 | **176** |
+|---|---|---|---|---|---|---|---|---|
+| drift tijdens klim | −2° | −5° | −6° | −1° | −6° | −7° | −7° | **+132°** |
+
+Dat is geen schattingsfout: de gyroscoop mat +147° en de EKF +159°, dus
+fysiek gedraaid. De koppelbalans tussen de draairichtingen was daarbij
+normaal (−26 tegen een basislijn van −34..+19), dus het staat los van de
+rol-scheefstand.
+
+Het past bij de al langer bekende eigenschap dat sommige motoren meer gas
+nodig hebben om aan te slaan: tijdens de klim loopt het gas op, en een motor
+die later inschakelt breekt de koppelbalans tijdelijk. Bij constant hovergas
+verdwijnt het — precies wat de log laat zien, want de draai stopte zodra de
+hoogte bereikt was.
+
+**Daarom wordt dit tijdens de KLIM gemeten en niet tijdens het stilhangen.**
+De heading wordt bijgehouden vanaf het takeoff-commando tot de hoogte bereikt
+is; het resultaat gaat mee in het oordeel van de hovertest. Niemand
+commandeert daar yaw — ArduCopter niet en search.py niet — dus alles wat
+gemeten wordt, is de drone die zichzelf verdraait.
 
 ### Fase 1 — Peilen (STAPSGEWIJS, 12 × 30°)
 Draai naar de hoek, **stop**, laat uitzweven, meet 5 packets stilstaand,

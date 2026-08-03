@@ -207,18 +207,52 @@ def toestand(vx, vy, vz, pwm, clip=0, mode='GUIDED'):
     return {'flight_mode': mode, 'vibe_x': vx, 'vibe_y': vy, 'vibe_z': vz,
             'vibe_clip': clip, 'motor_pwm': pwm}
 
+# De drempels zijn geijkt op de acht echte vluchten van dit toestel. Alle
+# vluchten vóór de reparatie hingen op 87-124 PWM spreiding — ook de zes
+# GESLAAGDE meetvluchten. Alleen vlucht 176 (na de reparatie, 422 PWM met de
+# rol-as omgeklapt) hoort afgekeurd te worden.
+echte_vluchten = [
+    ('161 24-7 rotatie',     [1594, 1672, 1682, 1601], True),
+    ('163 28-7 rotatie',     [1636, 1709, 1722, 1612], True),
+    ('165 29-7 nadering',    [1622, 1667, 1712, 1618], True),
+    ('166 1-8 zoek',         [1623, 1695, 1694, 1585], True),
+    ('167 2-8 zoek',         [1588, 1669, 1685, 1588], True),
+    ('169 2-8 zoek ok',      [1605, 1686, 1709, 1603], True),
+    ('170 2-8 crash',        [1587, 1698, 1711, 1643], True),
+    ('176 3-8 na reparatie', [1840, 1418, 1501, 1810], False),
+]
+for naam, pwm, verwacht_ok in echte_vluchten:
+    ok, tekst, _ = search._hovertest(toestand(12, 18, 15, pwm))
+    check(f'{naam} ({max(pwm)-min(pwm)} PWM): {"door" if verwacht_ok else "afgekeurd"}',
+          ok == verwacht_ok, tekst[:60])
+
 for naam, s, verwacht_ok in (
-        ('gezond', toestand(12, 15, 14, [1650, 1660, 1680, 1670]), True),
-        ('crashvlucht 2-8 (26 trilling, 103 PWM)',
-         toestand(13, 26, 25, [1623, 1708, 1725, 1626]), True),
         ('trilling 70', toestand(20, 70, 30, [1650, 1660, 1680, 1670]), False),
-        ('motoren 200 PWM scheef', toestand(12, 15, 14, [1500, 1700, 1600, 1550]), False),
+        ('motoren 250 PWM scheef', toestand(12, 15, 14, [1500, 1750, 1600, 1550]), False),
         ('geen telemetrie', toestand(-1, -1, -1, []), True)):
     ok, tekst, meting = search._hovertest(s)
     check(f'{naam}: {"door" if verwacht_ok else "afgekeurd"}', ok == verwacht_ok, tekst[:70])
 
-ok, tekst, _ = search._hovertest(toestand(13, 26, 25, [1623, 1708, 1725, 1626]))
-check('crashvlucht krijgt wel de waarschuwing', 'motoren staan scheef' in tekst, tekst[:70])
+# Ongevraagde draai tijdens de klim. Basislijn over acht vluchten: -1 tot
+# -7°, behalve vlucht 176 met +132°. Die vlucht had een normale motorbalans
+# in de yaw-as, dus dit is een ander verschijnsel dan de rol-scheefstand en
+# de stilhang-meting vangt het niet.
+gezond_pwm = [1650, 1660, 1680, 1670]
+for drift, verwacht_ok, label in ((-2.0, True, '161'), (-5.0, True, '163'),
+                                  (-6.0, True, '165'), (-1.0, True, '166'),
+                                  (-6.0, True, '167'), (-7.0, True, '169'),
+                                  (-7.0, True, '170'), (132.0, False, '176')):
+    ok, tekst, meting = search._hovertest(toestand(12, 18, 15, gezond_pwm),
+                                          klim_yawdrift=drift)
+    check(f'klim-yawdrift {drift:+.0f}° (log {label}): '
+          f'{"door" if verwacht_ok else "afgekeurd"}', ok == verwacht_ok, tekst[:70])
+ok, tekst, _ = search._hovertest(toestand(12, 18, 15, gezond_pwm), klim_yawdrift=20.0)
+check('20° drift -> door met waarschuwing',
+      ok and 'draaide weg tijdens de klim' in tekst, tekst[:80])
+ok, tekst, m = search._hovertest(toestand(12, 18, 15, gezond_pwm), klim_yawdrift=-45.0)
+check('drift telt absoluut (linksom is ook fout)', not ok, tekst[:70])
+ok, _, m = search._hovertest(toestand(12, 18, 15, gezond_pwm))
+check('zonder klim-meting blijft het veld leeg', m['klim_yawdrift'] is None)
 
 # clipping is een OPLOPENDE teller: de toename tijdens het venster telt
 s = toestand(12, 15, 14, [1650, 1660, 1680, 1670], clip=7)

@@ -109,28 +109,77 @@ import pattern
 HOVERTEST_DUUR_S = 5.0        # meetvenster; lang genoeg voor ~20 monsters op 4 Hz
 
 # ArduPilot-richtlijn: < 30 goed, 30-60 twijfelachtig, > 60 probleem.
-# Bij de val stond hij op 26 vlak vóór het defect en piekte op 114.
+# Gemeten op dit toestel tijdens rustig hangen: 16-21 op de geslaagde
+# vluchten, 31-32 op de vluchten 166, 170 (de val) en 176. Bij de val zelf
+# piekte hij op 114. De richtlijn en de eigen basislijn wijzen dezelfde kant
+# op, dus die houden we aan.
 HOVERTEST_VIBE_WAARSCHUWING = 30.0
 HOVERTEST_VIBE_MAX          = 60.0
 
 # Verschil tussen de hardst en zachtst draaiende motor bij stilhangen.
-# Bij de val: 103 PWM. Een toestel in balans haalt dat bij lange na niet.
-HOVERTEST_MOTOR_WAARSCHUWING = 80
-HOVERTEST_MOTOR_MAX          = 150
+#
+# GEIJKT OP DIT TOESTEL, niet op een vuistregel. Gemeten over acht vluchten,
+# steeds in een venster van 30 s rustig hangen boven 1,5 m:
+#
+#     log 161  24-7 rotatie      87 PWM      log 167  2-8 zoek        97 PWM
+#     log 163  28-7 rotatie     110 PWM      log 169  2-8 zoek ok    106 PWM
+#     log 165  29-7 nadering     94 PWM      log 170  2-8 CRASH      124 PWM
+#     log 166  1-8 zoek         109 PWM      log 176  3-8 na reparatie 422 PWM
+#
+# Deze quad hangt dus normaal op 87-124 PWM spreiding — ook op de zes
+# GESLAAGDE meetvluchten. Een eerdere lezing dat 103 PWM al een waarschuwing
+# was, klopte niet: dat is gewoon de basislijn. Een grens van 80 zou elke
+# vlucht uit dit project hebben tegengehouden.
+#
+# De vaste scheefstand zit in de ROL-as: op alle zeven vluchten vóór de
+# reparatie liep de linkerkant 70-94 PWM harder dan de rechter. Dat is een
+# onschadelijke eigenschap van deze bouw.
+#
+# 200 laat alle acht historische vluchten door en vangt vlucht 176 (422 PWM,
+# rol-as omgeklapt naar +365) ruim. 140 waarschuwt zonder vals alarm.
+HOVERTEST_MOTOR_WAARSCHUWING = 140
+HOVERTEST_MOTOR_MAX          = 200
 
 # Clipping betekent dat de versnellingsmeter zijn bereik raakt: dan is de
 # hoogte- en standschatting niet meer te vertrouwen. Nul is de enige
 # acceptabele waarde bij stilhangen.
 HOVERTEST_CLIP_MAX = 0
 
+# Ongevraagde draai TIJDENS DE KLIM.
+#
+# Niemand commandeert yaw tijdens een takeoff: ArduCopter doet het niet en
+# search.py stuurt vóór de hovertest geen enkel yaw-commando. Draait de drone
+# toch, dan klopt de koppelbalans niet.
+#
+# Gemeten over acht vluchten, van het takeoff-commando tot het bereiken van
+# de hoogte:
+#     161: -2°   163: -5°   165: -6°   166: -1°
+#     167: -6°   169: -7°   170: -7°   176: +132°
+#
+# Zeven vluchten binnen 7°, de vlucht na de reparatie 132°. Op die vlucht mat
+# de gyroscoop +147° en de EKF +159°: fysiek gedraaid, geen schattingssprong.
+# Het gebeurde uitsluitend tijdens de klim en stopte zodra de hoogte bereikt
+# was — wat past bij motoren die niet allemaal even snel aanslaan als het gas
+# oploopt. Bij constant hovergas is er niets meer van te zien, dus de
+# stilhang-meting vangt dit NIET; het moet tijdens de klim gemeten worden.
+#
+# 30° is ruim vier keer de hoogste waarde uit de basislijn.
+HOVERTEST_YAWDRIFT_WAARSCHUWING = 15.0
+HOVERTEST_YAWDRIFT_MAX          = 30.0
 
-def _hovertest(status, duur_s=None):
+
+def _hovertest(status, duur_s=None, klim_yawdrift=None):
     """
     Hang stil en lees de toestandsbewaking van de vluchtcontroller uit.
 
     Meet trilling (VIBRATION) en de spreiding tussen de vier motoren
     (SERVO_OUTPUT_RAW) over een venster. Beide komen uit de Pixhawk zelf; we
     voegen niets toe, we kijken alleen naar wat er toch al gemeten wordt.
+
+    klim_yawdrift is de ongevraagde draai tijdens de klim, in graden. Die
+    wordt daar gemeten en niet hier, omdat het verschijnsel alleen optreedt
+    terwijl het gas oploopt — bij constant hovergas is er niets meer van te
+    zien.
 
     Returns (in_orde, oordeel_tekst, metingen_dict). Ontbreekt de telemetrie
     (oudere firmware, stream niet actief), dan is in_orde True met een
@@ -161,9 +210,11 @@ def _hovertest(status, duur_s=None):
         'motor_spreiding': round(statistics.median(spreidingen)) if spreidingen else None,
         'clip': clip,
         'n': len(vibes),
+        'klim_yawdrift': (None if klim_yawdrift is None
+                          else round(abs(klim_yawdrift), 1)),
     }
 
-    if not vibes and not spreidingen:
+    if not vibes and not spreidingen and klim_yawdrift is None:
         return True, ('geen toestandstelemetrie ontvangen — hovertest '
                       'overgeslagen'), meting
 
@@ -176,10 +227,16 @@ def _hovertest(status, duur_s=None):
                        f"> {HOVERTEST_MOTOR_MAX}")
     if clip > HOVERTEST_CLIP_MAX:
         redenen.append(f'{clip} keer clipping op de versnellingsmeter')
+    if (meting['klim_yawdrift'] is not None
+            and meting['klim_yawdrift'] > HOVERTEST_YAWDRIFT_MAX):
+        redenen.append(f"{meting['klim_yawdrift']:.0f}° ongevraagd gedraaid "
+                       f"tijdens de klim > {HOVERTEST_YAWDRIFT_MAX:.0f}°")
 
     tekst = (f"trilling max {meting['vibe_max']}, gem {meting['vibe_gem']}; "
              f"motoren {meting['motor_spreiding']} PWM uit elkaar; "
              f"clipping {clip}")
+    if meting['klim_yawdrift'] is not None:
+        tekst += f"; klim-yawdrift {meting['klim_yawdrift']:.0f}°" 
     if redenen:
         return False, tekst + ' -> AFGEKEURD: ' + ', '.join(redenen), meting
 
@@ -189,6 +246,9 @@ def _hovertest(status, duur_s=None):
     if (meting['motor_spreiding'] is not None
             and meting['motor_spreiding'] > HOVERTEST_MOTOR_WAARSCHUWING):
         let_op.append('motoren staan scheef')
+    if (meting['klim_yawdrift'] is not None
+            and meting['klim_yawdrift'] > HOVERTEST_YAWDRIFT_WAARSCHUWING):
+        let_op.append('draaide weg tijdens de klim')
     if let_op:
         tekst += ' -> let op: ' + ', '.join(let_op)
     return True, tekst, meting
@@ -1399,10 +1459,18 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
 
         melden('takeoff', f'Opstijgen naar {hoogte} m...')
         mission._cmd_takeoff(get_mav, mavutil, hoogte)
+        # Ongevraagde draai meten terwijl het gas oploopt. Niemand
+        # commandeert hier yaw, dus alles wat we zien is de drone die zichzelf
+        # verdraait — zie HOVERTEST_YAWDRIFT_MAX.
+        klim_yawdrift = 0.0
+        vorige_heading = status.get('heading', 0.0)
         deadline = time.time() + TAKEOFF_TIMEOUT_S
         while time.time() < deadline:
             if pattern._pilot_has_taken_over(status):
                 afbreken_door_piloot(); return
+            nu_heading = status.get('heading', 0.0)
+            klim_yawdrift += ((nu_heading - vorige_heading + 180) % 360) - 180
+            vorige_heading = nu_heading
             if status.get('altitude', 0) >= hoogte * 0.95:
                 break
             time.sleep(0.3)
@@ -1413,7 +1481,8 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
         # Nu, op zoekhoogte en boven het opstijgpunt: deugt het niet, dan
         # landen we waar we staan zonder ook maar één meter te vliegen.
         melden('hovertest', 'Toestandscontrole — stilhangen en meten...')
-        gezond, oordeel, hovermeting = _hovertest(status)
+        gezond, oordeel, hovermeting = _hovertest(
+            status, klim_yawdrift=klim_yawdrift)
         kop.append(f'hovertest: {oordeel}')
         print(f'[search] hovertest: {oordeel}')
         if not gezond:
