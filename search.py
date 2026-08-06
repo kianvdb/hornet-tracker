@@ -131,12 +131,24 @@ HOVERTEST_VIBE_MAX          = 60.0
 # was, klopte niet: dat is gewoon de basislijn. Een grens van 80 zou elke
 # vlucht uit dit project hebben tegengehouden.
 #
-# De vaste scheefstand zit in de ROL-as: op alle zeven vluchten vóór de
-# reparatie liep de linkerkant 70-94 PWM harder dan de rechter. Dat is een
-# onschadelijke eigenschap van deze bouw.
+# De vaste scheefstand zit in de YAW-as: op alle zeven vluchten vóór de val
+# liepen de tegen-de-klok-in draaiende motoren 73-94 PWM harder dan de andere
+# twee. Een kleine, onschadelijke draaitrim van deze bouw; de rol-as is over
+# alle vluchten in balans.
 #
-# 200 laat alle acht historische vluchten door en vangt vlucht 176 (422 PWM,
-# rol-as omgeklapt naar +365) ruim. 140 waarschuwt zonder vals alarm.
+# LET OP bij het lezen van een log: `RCOU.C1..C4` zijn NIET motor 1 tot 4. De
+# ESC's zitten via SERVOn_FUNCTION omgezet (C1=motor 4 rechtsachter CW,
+# C2=motor 1 rechtsvoor CCW, C3=motor 2 linksachter CCW, C4=motor 3 linksvoor
+# CW). Wie die volgorde negeert, leest de yaw-as als de rol-as — precies de
+# fout die de diagnose na de val een week de verkeerde kant op stuurde. Zie
+# docs/zoekalgoritme-ontwerp.md §3.
+#
+# Deze drempel kijkt naar het VERSCHIL tussen de hardste en de zachtste motor
+# en is daarmee onafhankelijk van welke motor waar zit; de omzetting hierboven
+# raakt de test dus niet, alleen de verklaring erachter.
+#
+# 200 laat alle acht historische vluchten door en vangt vlucht 176 (420 PWM,
+# yaw-as omgeklapt naar -367) ruim. 140 waarschuwt zonder vals alarm.
 HOVERTEST_MOTOR_WAARSCHUWING = 140
 HOVERTEST_MOTOR_MAX          = 200
 
@@ -156,12 +168,16 @@ HOVERTEST_CLIP_MAX = 0
 #     161: -2°   163: -5°   165: -6°   166: -1°
 #     167: -6°   169: -7°   170: -7°   176: +132°
 #
-# Zeven vluchten binnen 7°, de vlucht na de reparatie 132°. Op die vlucht mat
+# Zeven vluchten binnen 7°, de vluchten na de val 82-132°. Op vlucht 176 mat
 # de gyroscoop +147° en de EKF +159°: fysiek gedraaid, geen schattingssprong.
-# Het gebeurde uitsluitend tijdens de klim en stopte zodra de hoogte bereikt
-# was — wat past bij motoren die niet allemaal even snel aanslaan als het gas
-# oploopt. Bij constant hovergas is er niets meer van te zien, dus de
-# stilhang-meting vangt dit NIET; het moet tijdens de klim gemeten worden.
+#
+# Dit is GEEN los mankement maar hetzelfde draaikoppel dat ook de motoren uit
+# elkaar drijft, zichtbaar in de fase waarin de regelaar nog niet bijgebeend
+# is: de drone komt al draaiend los (+27 tot +36 gr/s tegen -7..+8 op de
+# gezonde vluchten) en heeft ~4,5 s nodig om dat te stoppen. Zodra hij
+# stilhangt houdt hij de koers wel, want dan heeft hij de tijd — en daarom
+# vangt de stilhang-meting dit NIET en moet het tijdens de klim gemeten
+# worden.
 #
 # 30° is ruim vier keer de hoogste waarde uit de basislijn.
 HOVERTEST_YAWDRIFT_WAARSCHUWING = 15.0

@@ -5,6 +5,11 @@ meetvluchten en de ontwerpreview samen zodat een volgend gesprek kan bouwen
 zonder de hele meetgeschiedenis te herhalen. Status: **gebouwd en vijf keer gevlogen**; fasen 1, 3 en 4 zijn
 herzien op grond van die vluchten — zie §9.
 
+> **Het algoritme is af; het toestel niet.** Sinds de val van 2-8 keurt de
+> hovertest elke vlucht af op een draaikoppel dat na vijf inspecties niet
+> gelokaliseerd is. Er wordt opnieuw gebouwd met behoud van de radioketen —
+> zie §8. Verder sleutelen aan `search.py` heeft tot die tijd geen zin.
+
 ---
 
 ## 1. Doel en scope
@@ -85,50 +90,93 @@ in de log — er keek alleen niemand naar.
 
 De gemeten waarden gaan altijd de CSV-kop in, ook als de test slaagt.
 
-**Basislijn van dít toestel**, gemeten over acht vluchten in een venster van
-30 s rustig hangen boven 1,5 m:
+**Eerst de kanaaltoewijzing — zonder deze tabel leest elke log verkeerd.**
+De ESC's zitten op dit toestel niet in de standaardvolgorde op de Pixhawk;
+dat is rechtgezet met `SERVOn_FUNCTION` na de allereerste crash (33 = motor 1,
+34 = motor 2, 35 = motor 3, 36 = motor 4). De **logkolommen `RCOU.C1..C4` zijn
+dus niet motor 1 tot 4.** Bevestigd tegen de bedrading van de operator:
 
-| log | vlucht | spreiding | rol-as | trilling |
-|---|---|---|---|---|
-| 161 | 24-7 rotatie | 87 PWM | −79 | 18,4 |
-| 163 | 28-7 rotatie | 110 PWM | −92 | 20,9 |
-| 165 | 29-7 nadering | 94 PWM | −70 | 17,2 |
-| 166 | 1-8 zoek | 109 PWM | −90 | 32,2 |
-| 167 | 2-8 zoek | 97 PWM | −89 | 16,5 |
-| 169 | 2-8 zoek ok | 106 PWM | −94 | 19,0 |
-| 170 | 2-8 val | 124 PWM | −89 | 31,2 |
-| **176** | **3-8 na reparatie** | **422 PWM** | **+365** | **32,1** |
+| logkolom | ArduPilot-motor | positie | draairichting |
+|---|---|---|---|
+| `C1` | motor 4 | rechtsachter | CW |
+| `C2` | motor 1 | rechtsvoor | CCW |
+| `C3` | motor 2 | linksachter | CCW |
+| `C4` | motor 3 | linksvoor | CW |
 
-**Deze quad hangt normaal op 87-124 PWM spreiding — ook op de zes geslaagde
+Ontleding per as, als half verschil zodat het per motor leest:
+
+```
+  rol   = ((C1 + C2) − (C3 + C4)) / 2      rechts − links
+  pitch = ((C2 + C4) − (C1 + C3)) / 2      voor  − achter
+  yaw   = ((C2 + C3) − (C1 + C4)) / 2      CCW   − CW
+```
+
+**Basislijn van dít toestel**, per vlucht, in een venster van 30 s rustig
+hangen na de klim:
+
+| log | vlucht | spreiding | rol | pitch | yaw | trilling |
+|---|---|---|---|---|---|---|
+| 161 | 24-7 rotatie | 88 PWM | −8 | +3 | **+80** | 18,4 |
+| 163 | 28-7 rotatie | 110 PWM | +6 | −18 | **+92** | 20,9 |
+| 165 | 29-7 nadering | 100 PWM | −20 | −27 | **+73** | 17,2 |
+| 166 | 1-8 zoek | 119 PWM | +26 | −12 | **+94** | 32,2 |
+| 167 | 2-8 zoek | 94 PWM | −5 | −5 | **+89** | 16,5 |
+| 169 | 2-8 zoek ok | 106 PWM | −11 | −12 | **+94** | 19,0 |
+| 170 | 2-8 val | 128 PWM | −34 | +24 | **+93** | 31,2 |
+| **176** | **3-8 na reparatie** | **420 PWM** | −27 | −53 | **−367** | **32,1** |
+| **177a** | **3-8 na reparatie** | **334 PWM** | −18 | +19 | **−315** | **26,3** |
+| **177b** | **3-8 na reparatie** | **417 PWM** | −33 | −71 | **−346** | **39,9** |
+| **179** | **4-8 na 2e ESC-reparatie** | **325 PWM** | +8 | −7 | **−317** | **26,0** |
+
+**Deze quad hangt normaal op 88-128 PWM spreiding — ook op de zes geslaagde
 meetvluchten.** Een eerdere lezing dat de 103 PWM vóór de val al een
 waarschuwing was, klopte niet: dat is gewoon de basislijn, en een grens van
 80 zou elke vlucht uit dit project hebben tegengehouden.
 
-De vaste scheefstand zit in de **rol-as**: op alle zeven vluchten vóór de
-reparatie liep de linkerkant 70-94 PWM harder. Onschadelijke eigenschap van
-deze bouw. Op vlucht 176 klapte dat om naar +365 — de rechterkant vier keer
-zo hard, wat op zwaartepuntverschuiving wijst en niet op een motorstoring:
-de verandering zat vrijwel volledig in de rol-as (+454), tegen +44 in pitch
-en −11 in yaw. Eén haperende motor zou alle drie de assen raken.
+De vaste scheefstand zit in de **yaw-as**: op alle zeven vluchten vóór de val
+liepen de CCW-motoren 73-94 PWM harder dan de CW-motoren. Een kleine,
+onschadelijke draaitrim van deze bouw. **De rol-as is over alle elf de
+vluchten in balans** (−34 tot +26), vóór én na de val.
 
-**Ongevraagde draai tijdens de klim** is een tweede, los verschijnsel. Op
+Na de val klapte de yaw-as om naar −315 tot −367: nu lopen de CW-motoren ruim
+300 PWM harder. De verandering zit vrijwel volledig in die ene as (~440 PWM),
+tegen ~60 in pitch en nul in rol.
+
+> **Een eerdere lezing van deze tabel was fout en is hier rechtgezet.** Door
+> `C1..C4` als motor 1 tot 4 te lezen, kwam de scheefstand in de ROL-as
+> terecht en leek er massa naar rechts verschoven te zijn. Dat klopt niet:
+> een zwaartepuntverschuiving kan fysiek **geen** draaikoppel om de verticale
+> as maken, en de rol-as is onveranderd. Balanceren op twee vingers toetst
+> een as die nooit bewogen heeft.
+
+**Ongevraagde draai tijdens de klim** is géén tweede verschijnsel maar
+hetzelfde, zichtbaar in de fase waarin de regelaar nog niet bijgebeend is. Op
 vlucht 176 draaide de drone 147° om zijn as tussen t=3 s en t=8 s, terwijl de
 zeven eerdere vluchten binnen 1-7° bleven:
 
-| log | 161 | 163 | 165 | 166 | 167 | 169 | 170 | **176** |
-|---|---|---|---|---|---|---|---|---|
-| drift tijdens klim | −2° | −5° | −6° | −1° | −6° | −7° | −7° | **+132°** |
+| log | 161 | 163 | 165 | 166 | 167 | 169 | 170 | **176** | **179** |
+|---|---|---|---|---|---|---|---|---|---|
+| drift tijdens klim | −2° | −5° | −6° | −1° | −6° | −7° | −7° | **+132°** | **+82°** |
+
+Vier keer hetzelfde beeld na de val, dus reproduceerbaar en geen ruis.
 
 Dat is geen schattingsfout: de gyroscoop mat +147° en de EKF +159°, dus
-fysiek gedraaid. De koppelbalans tussen de draairichtingen was daarbij
-normaal (−26 tegen een basislijn van −34..+19), dus het staat los van de
-rol-scheefstand.
+fysiek gedraaid. Wat de log laat zien is dat de drone **al draaiend loskomt**
+— +27 tot +36 °/s op het moment van opstijgen, tegen −7 tot +8 op de gezonde
+vluchten — en dat de yaw-regelaar ongeveer 4,5 s nodig heeft om die draai te
+stoppen. In die 4,5 s veegt hij de 60 tot 130° die de test meet. Zodra hij
+stilhangt houdt hij de koers wel, want dan heeft hij de tijd.
 
-Het past bij de al langer bekende eigenschap dat sommige motoren meer gas
-nodig hebben om aan te slaan: tijdens de klim loopt het gas op, en een motor
-die later inschakelt breekt de koppelbalans tijdelijk. Bij constant hovergas
-verdwijnt het — precies wat de log laat zien, want de draai stopte zodra de
-hoogte bereikt was.
+De regelaar betaalt daar permanent voor: zijn yaw-uitgang staat op −0,48 tot
+−0,51 waar hij op de gezonde vluchten op +0,11 tot +0,14 stond, en de
+integrator komt in evenwicht op ~0,5 — precies zijn `ATC_RAT_YAW_IMAX`. Er is
+dus geen reserve meer voor een windvlaag of een draaicommando. De twee
+CW-motoren hangen bovendien op 78% van hun bereik tegen 59% normaal, wat meer
+dan de helft van de bovenmarge voor rol- en pitchcorrecties wegneemt.
+
+De eerdere verklaring — "motoren die later aanslaan breken de koppelbalans
+tijdens de klim" — verklaart de startdrempel maar niet dit: het draaikoppel
+staat er ook in stabiele zweefvlucht, en het verdwijnt niet bij constant gas.
 
 **Daarom wordt dit tijdens de KLIM gemeten en niet tijdens het stilhangen.**
 De heading wordt bijgehouden vanaf het takeoff-commando tot de hoogte bereikt
@@ -518,12 +566,48 @@ bij 5 packets) daar ~5° van verklaart; de rest zit in het patroon zelf.
 Meer packets per hoek helpt dus maar tot ~2,7° en kost lineair vliegtijd.
 De echte winst zit in een smallere lob — zie het link-tekort hierboven.
 
-### Mechanische toestand van het toestel
-De val van 2-8 21:26 was mechanisch, geen software (zie fase 0). Het toestel
-is daarna opgelapt: de ongebruikte telemetriemodule (rechtsachter) is
-verwijderd, de voedingsmodule staat gecentreerder en de accu is naar voren
-geschoven — alle drie tegen de scheefstand die de log liet zien, waarbij de
-diagonaal linksvoor/linksachter structureel harder werkte.
+### Mechanische toestand van het toestel — het toestel vliegt niet meer
+De val van 2-8 21:26 was mechanisch, geen software (zie fase 0). Sindsdien is
+de hovertest **vier keer op rij afgekeurd** en is er niet meer gezocht.
+
+Wat er is gevonden en gerepareerd:
+
+| | gevonden | gerepareerd | effect op de meting |
+|---|---|---|---|
+| ESC M1 linksvoor (CW) | na de val van 2-8 | ja | de val zelf verklaard |
+| ESC M4 linksachter (CCW) | 4-8, bij de tweede inspectie | ja | trilling terug naar 26; M4 weer gelijk met zijn CCW-partner |
+| frame 5 mm uit het vierkant aan de rechterzijde | 4-8 | nee | geen; armlengte raakt de yaw-as niet |
+| licht verschoven wikkelingen in een motor | 4-8 | nee | onbekend |
+
+De reparatie van M4 is meetbaar geslaagd: de trilling zakte van 39,9 naar
+26,0, de rol- en pitch-as kwamen terug op nul, en M4 werd binnen zijn eigen
+draairichtingspaar weer gelijk aan M3 (van +104 PWM erboven naar −1). **Het
+draaikoppel bewoog niet**: −346 vóór, −317 na. Het is dus een tweede,
+onafhankelijk mankement.
+
+Wat er níét de oorzaak van kan zijn, en waarom:
+
+- **Zwaartepunt.** Kan geen koppel om de verticale as maken; de rol-as is bovendien onveranderd.
+- **Propellers.** Het zijn dezelfde vier die log 170 met yaw +93 vlogen, nooit vervangen, en carbon breekt in plaats van te plooien.
+- **Een enkele zwakke motor of ESC.** Motorsterkte schaalt stuwkracht en koppel samen; de verhouding koppel/stuwkracht is een eigenschap van de propeller, niet van de motor. Bovendien wordt niet één kanaal opgetild maar een heel diagonaal paar, en dat past niet bij één zwakke motor.
+- **De verwijderde telemetriemodule.** Massa verplaatsen maakt rol- en pitchmomenten, geen draaikoppel.
+
+Wat het wél kan zijn: een tangentiële scheefstand van enkele graden op een
+motorsteun of een arm die in zijn klem is verdraaid — dat geeft koppel zonder
+noemenswaardig stuwkrachtverlies en is met het oog niet te zien — of
+inwendige wrijving in een motor, die koppel kost maar geen stuwkracht.
+
+**Besluit: opnieuw bouwen.** Frame, motoren en snelheidsregelaars worden
+vervangen; vluchtcontroller, GPS, Raspberry Pi en de **volledige radioketen**
+(beacon, Yagi, ontvanger, kabels, montagepositie) verhuizen ongewijzigd mee.
+Die laatste is niet onderhandelbaar: verandert daar iets, dan zijn de
+peilnauwkeurigheid, de lobbreedte en het link-tekort uit §2 en §8 niet meer
+vergelijkbaar met wat erna komt.
+
+De hovertest wordt daarmee de **acceptatietest van de nieuwe bouw**: spreiding
+onder 128 PWM, yaw-as tussen +73 en +94, klimdraai onder 10°, trilling onder
+30. Haalt de nieuwe bouw dat, dan is het aantoonbaar hetzelfde toestel als dat
+van de zes geslaagde meetvluchten en blijven alle eerdere metingen geldig.
 
 Wat de hovertest niet uitsluit: een propeller met een haarscheur of een losse
 motorschroef geven pas onder toerental problemen. Handmatig draaien sluit
@@ -560,3 +644,8 @@ vluchten.
 | alle drie | eerste peilstap draaide bijna 360° de verkeerde kant op en werd midden in de draai gemeten | `_cmd_yaw_kortste`; niet-bereikte hoek wordt overgeslagen |
 | 2-8 21:26 | val na de richtingbepaling; mechanisch (trilling eerst, stand daarna), motoren stonden al 103 PWM scheef tijdens de hover | hovertest als fase 0; `VIBRATION` en `SERVO_OUTPUT_RAW` in de status-dict |
 | 2-8 21:26 | peiling 5,8° naast de beacon bij een 170° gedraaide geometrie — beste resultaat tot dan, op een onafhankelijke opstelling | bevestigt zwaartepunt + kortste-weg-draai |
+| 3-8 (3×) | hovertest keurt af op 361-413 PWM spreiding en 117-125° klimdraai; niet gevlogen | drempels blijken juist geijkt; toestel is het probleem, niet de test |
+| 3-8 (analyse) | logkolommen `C1..C4` zijn niet motor 1-4; de scheefstand zit in de **yaw-as**, niet in de rol-as | §3 rechtgezet; zwaartepunt-hypothese vervalt |
+| 4-8 | tweede bezweken ESC-soldering (M4 linksachter) hersteld: trilling en rol/pitch terug op de basislijn, **draaikoppel onveranderd** | tweede, onafhankelijk mankement; niet gelokaliseerd |
+| 4-8 | yaw-integrator komt in evenwicht op zijn `IMAX`; twee motoren op 78% van hun bereik tegen 59% normaal | geen reserve meer voor wind of draaicommando's |
+| 4-8 | vijf inspecties vinden de oorzaak van het draaikoppel niet; frame niet te openen | herbouw met behoud van de volledige radioketen; hovertest wordt acceptatietest |
