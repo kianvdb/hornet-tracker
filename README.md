@@ -5,12 +5,22 @@ hoornaarnesten met een autonome RF-tracking drone. Bachelorthesis-project
 aan Erasmushogeschool Brussel, opleiding Multimedia en Creatieve
 Technologie.
 
-De drone — VespaTrack — draagt een RF-ontvanger en patrouilleert door
-een gebied terwijl ze het signaal volgt van een kleine LoRa-beacon die
-op een testobject is geplakt. Het grondstation toont in real-time de
-drone-positie op een satellietkaart, het ontvangen LoRa-signaal met
-RSSI/SNR per packet, een thermisch beeld voor visuele bevestiging op
-korte afstand, en biedt bediening van de vlucht.
+De drone — VespaTrack — draagt een RF-ontvanger en zoekt zelfstandig
+naar een kleine LoRa-beacon die op een testobject is geplakt. Eén knop
+op het dashboard start een volledige zoekvlucht: de drone peilt de
+richting van de beacon, controleert die richting, vliegt er dwars
+overheen en bepaalt uit twee kruisingen de positie. Het grondstation
+toont ondertussen in real-time de drone-positie op een satellietkaart,
+het ontvangen LoRa-signaal met RSSI en signaalgetrouwheid per packet,
+een thermisch beeld voor visuele bevestiging op korte afstand, en biedt
+bediening van de vlucht.
+
+> **Status.** Het zoekalgoritme is af, gevlogen en drie keer herzien op
+> grond van veldmetingen. Het toestel zelf niet: na een val in augustus
+> 2026 vertoont het een mechanisch draaikoppel dat na vijf inspecties
+> niet gelokaliseerd is, en de toestandscontrole weigert sindsdien elke
+> vlucht. Het platform wordt herbouwd met behoud van de volledige
+> radioketen. Zie [`docs/zoekalgoritme-ontwerp.md`](docs/zoekalgoritme-ontwerp.md) §8.
 
 ---
 
@@ -26,6 +36,7 @@ korte afstand, en biedt bediening van de vlucht.
 - [Offline veldwerk](#offline-veldwerk)
 - [Thermisch beeld](#thermisch-beeld)
 - [LoRa signaal](#lora-signaal)
+- [Zoekalgoritme](#zoekalgoritme)
 - [Adres-lookup](#adres-lookup)
 - [Ontwikkelen](#ontwikkelen)
 - [Roadmap](#roadmap)
@@ -58,9 +69,16 @@ De Raspberry Pi op de drone draait een Flask + Socket.io webserver. De
 operator opent het dashboard in een browser op de veldlaptop. Alle
 communicatie tussen drone en grondstation gebeurt via Socket.io
 websockets zodat de UI in real-time updates ontvangt zonder polling.
-Commando's vanuit het dashboard (arm, disarm, mode-wijziging) gaan
-dezelfde weg terug naar de Pi en worden via MAVLink doorgestuurd naar
-de Pixhawk.
+Commando's vanuit het dashboard (arm, disarm, mode-wijziging, en het
+starten van een zoekmissie) gaan dezelfde weg terug naar de Pi en
+worden via MAVLink doorgestuurd naar de Pixhawk.
+
+De autonome vluchtlogica draait in eigen modules op de Pi
+(`search.py`, `pattern.py`, `approach.py`, `mission.py`), elk in een
+aparte thread die de gedeelde status-dict leest voor telemetrie. De
+zender blijft daarbij altijd primair: zodra de vluchtmodus niet langer
+GUIDED is, stopt het script onmiddellijk met commando's geven, schrijft
+het weg wat er gemeten is en sluit het af.
 
 ---
 
@@ -76,11 +94,22 @@ de Pixhawk.
 
 - **SX1278 Ra-01 LoRa-ontvanger** via SPI met Yagi 433 MHz antenne
   (~10 dBi gain) verbonden via IPEX-SMA pigtail. Decodeert `HT,<id>,<count>`
-  packets van een Arduino Pro Mini beacon (zelfde SX1278 chip) met TX
-  power 5-20 dBm afhankelijk van voeding-bron.
+  packets van een Arduino Pro Mini beacon (zelfde SX1278 chip). Alle
+  veldmetingen zijn gedaan op **2 dBm** TX-power; de module kan tot
+  20 dBm maar dat is in het veld nooit gebruikt.
+
 - Tijdens ontwikkeling is ook een RTL-SDR USB-stick gebruikt voor
   energy-detection als baseline-systeem (zie SignalSource interface
   in `app.py`).
+
+> **Openstaand: 45 dB link-tekort.** Over drie gemeten afstanden is de
+> ontvangen signaalsterkte constant ~45 dB zwakker dan vrije-ruimte-
+> propagatie voorspelt. Een tekort dat níét met de afstand verandert
+> wijst op een vaste verliespost in de keten — kruispolarisatie of een
+> niet-resonante antenne. Dit is vermoedelijk ook de reden dat de
+> antennelob 150-212° breed is en de peiling daardoor op ±30° blijft
+> steken. Een polarisatietest van twee minuten staat nog open en is de
+> goedkoopste ingreep met de grootste opbrengst.
 
 ### Sensoren
 
@@ -117,8 +146,8 @@ de Pixhawk.
 - **LoRa packet decoding** — pyLoRa library (SX127x) via SPI met
   polling-based RX in een aparte thread. Interrupt-callbacks worden
   niet ondersteund door `rpi-lgpio` (de drop-in vervanger van `RPi.GPIO`
-  op Pi OS Bookworm), dus we pollen het IRQ-register elke 50 ms — fijn
-  genoeg voor een 1 Hz beacon zonder noemenswaardige CPU-impact.
+  op Pi OS Bookworm), dus we pollen het IRQ-register elke 50 ms — ruim
+  fijn genoeg voor de 2 Hz beacon zonder noemenswaardige CPU-impact.
 - **RF-detectie (legacy/optioneel)** — pyrtlsdr met FFT-based energy
   detection en peak-hold baseline. Pad blijft beschikbaar via
   `SIGNAL_SOURCE = 'rtlsdr'` in `app.py`.
@@ -325,18 +354,50 @@ hornet-tracker/
 │                                   command handlers, thermal camera loop,
 │                                   Excel-export endpoint, tile-cache routes,
 │                                   Nominatim reverse-geocoding helpers
+│
+│   ── autonome vluchtmodules, elk in een eigen thread ──
+├── mission.py                      basiscommando's: GUIDED, arm, takeoff,
+│                                   hoogte-clamp. Fundament onder de rest
+├── pattern.py                      360°-rotatiemeting: stralingsdiagram
+│                                   opnemen (36 × 10°, stilstaand gemeten)
+├── approach.py                     rechte nadering naar de bron, stapsgewijs
+├── search.py                       het zoekalgoritme: hovertest + 5 fasen
+│                                   (peilen, verifiëren, doorvliegen,
+│                                   terugkruisen, afronden). Zie docs/
+├── download_dataflash.py           .BIN-vluchtlogs van de Pixhawk halen
+│                                   (wordt geïmporteerd door app.py)
 ├── prefetch_tiles.py               CLI tool: bulk-download tiles voor offline gebruik
 ├── README.md                       dit bestand
 ├── requirements.txt                Python dependencies
 ├── .gitignore
 │
+├── docs/
+│   └── zoekalgoritme-ontwerp.md    zelfstandige spec van search.py: elke
+│                                   parameter met zijn herkomst, het
+│                                   accu-budget, de faalgevallen, en per
+│                                   veldvlucht wat er is gewijzigd
+│
+├── scripts/                        losse operatorgereedschappen
+│   ├── read_params.py              Pixhawk-parameters uitlezen
+│   └── set_params.py               hoogte-parameters zetten
+│
+├── tests/                          draaien zonder drone, via de simulator
+│   ├── README.md                   hoe je ze draait en wat ze dekken
+│   ├── sim.py                      nagebouwde MAVLink + signaalbron
+│   ├── test_eenheden.py            snelle eenheidstests (~1 s)
+│   ├── test_vlucht.py              vier volledige vluchten in simulatie (~3 min)
+│   └── uitvoer/                    testuitvoer (gitignored, raakt data/ nooit)
+│
 ├── templates/
 │   └── dashboard.html              pure markup, geen inline JS/CSS
 │
-├── data/                           runtime persistente data (gitignored)
+├── data/                           meetdata + runtime state
 │   ├── README.md                   uitleg over wat hier hoort
-│   ├── coord-log.json              gelogde entries (met adres-cache), op de Pi
-│   └── tiles/                      lokaal gecachte map-tiles per source
+│   ├── pattern_*.csv               rotatiemetingen — ONDERZOEKSDATA, in git
+│   ├── approach_*.csv              naderingsmeting — ONDERZOEKSDATA, in git
+│   ├── search_*.csv                zoekvluchten — ONDERZOEKSDATA, in git
+│   ├── coord-log.json              gelogde entries (met adres-cache), gitignored
+│   └── tiles/                      lokaal gecachte map-tiles (gitignored)
 │       ├── osm/<z>/<x>/<y>.png     OpenStreetMap stratenplan
 │       ├── sat/<z>/<x>/<y>.png     ArcGIS satelliet (JPEG inhoud)
 │       └── hyb/<z>/<x>/<y>.png     ArcGIS straatnamen overlay
@@ -370,14 +431,19 @@ hornet-tracker/
         ├── nominatim.js            gedeelde Nominatim utility: forward search
         │                           + autocomplete-flow voor input-velden
         ├── map.js                  Leaflet init, drone marker (SVG arrow met
-        │                           heading-rotatie), trail, click-handler,
+        │                           heading-rotatie), afgelegde weg, click-handler,
         │                           adres-zoek in map card header
         ├── coord-log.js            log entries, map-click pin, status/notitie/
         │                           adres, edit, delete, REST naar backend,
         │                           Excel-export
         ├── drone-controls.js       arm/disarm/mode + command result handler
+        ├── mission-controls.js     START MISSIE + zoekhoogte + noodknoppen,
+        │                           voortgangsmeldingen per zoekfase
+        ├── pattern-controls.js     bediening van de rotatiemeting (pattern.py)
+        ├── tabs.js                 tabbladen Veld / Thermisch / Coördinaten —
+        │                           uit gebruikerstest 1: alles op één scherm
         ├── signal-display.js       LoRa signal card 3-tier rendering: RSSI/badge/bar,
-        │                           SNR + packet-age, packets count + tracker ID
+        │                           signaalgetrouwheid + packet-age, packets + tracker ID
         ├── thermal-display.js      MLX90640 canvas rendering + Iron/Inferno/
         │                           Grayscale/Rainbow paletten + baseline detectie
         ├── navbar.js               popover toggle + click-outside-to-close
@@ -391,21 +457,23 @@ hornet-tracker/
 
 `dashboard.html` laadt de JS-modules in deze volgorde:
 
-1. `utils.js`, `nominatim.js`, `map.js`, `coord-log.js`,
-   `drone-controls.js`, `signal-display.js`, `thermal-display.js` —
-   definiëren functies op `window`, geen socket nodig. `nominatim.js`
-   moet vóór de modules die hem consumeren (`map.js`, `tile-cache.js`)
-   geladen worden.
+1. `utils.js`, `map.js`, `coord-log.js`, `drone-controls.js`,
+   `mission-controls.js`, `signal-display.js`, `thermal-display.js` —
+   definiëren functies op `window`, geen socket nodig.
 2. `socket-handlers.js` — handlers die `window.socket` gebruiken.
 3. `modals.js` — dialog-logica voor alle modals.
-4. `tile-cache.js` — offline tiles UI + Nominatim adres-zoek.
-5. `navbar.js` — popover open/sluit logica voor navbar-items.
+4. `nominatim.js`, `tile-cache.js` — gedeelde geocoding-utility en de
+   offline tiles UI die hem consumeert.
+5. `navbar.js`, `tabs.js`, `pattern-controls.js` — popovers, tabbladen
+   en de bediening van de rotatiemeting.
 6. `main.js` — bootstrap: maakt de socket aan, haalt log van de Pi via
    `GET /api/log`, initialiseert alles na `DOMContentLoaded`.
 
 Alle module-functies worden op `window` gezet zodat inline
 `onclick="..."` handlers in de HTML rechtstreeks werken zonder
-build-step of bundler.
+build-step of bundler. Omdat elke module alleen definities uitvoert bij
+het laden en het echte werk pas na `DOMContentLoaded` begint, is de
+onderlinge volgorde binnen een groep niet kritisch.
 
 ---
 
@@ -586,7 +654,7 @@ zelfde chip als de ontvanger. Beacon-code in `beacon.ino`:
 - **CRC**: aan
 - **Sync word**: default 0x12
 
-Beacon stuurt elke seconde een ASCII-payload `HT,<id>,<count>`:
+Beacon stuurt elke 500 ms (2 Hz) een ASCII-payload `HT,<id>,<count>`:
 
 - `HT` — protocol-identifier (Hornet Tracker)
 - `<id>` — tracker-ID, voorzien voor multi-tracker uitbreiding
@@ -594,8 +662,16 @@ Beacon stuurt elke seconde een ASCII-payload `HT,<id>,<count>`:
 
 TX-power **5 dBm** voor USB-TTL testing (CH340 regulator levert
 ~50 mA, SX1278 piek tijdens TX is 120 mA — brownout-reset zonder
-verlaging). Voor veldwerk met LiPo-batterij op RAW/GND wordt
-TX-power naar **20 dBm** gezet.
+verlaging).
+
+Alle veldmetingen in `data/` zijn gedaan op **2 dBm**, niet op de
+eerder voorziene 20 dBm — dat staat ook in de kop van elk meetbestand.
+Een range-test op vol vermogen staat nog open; de huidige cijfers over
+bereik en peilnauwkeurigheid gelden dus voor 2 dBm.
+
+Zendinterval is 2 Hz. Dat is bewust vlak onder het maximum: bij een
+time-on-air van ~41 ms en 10% duty cycle op de 433 MHz ISM-band ligt
+de bovengrens rond 2,4 Hz.
 
 ### Dashboard layout
 
@@ -607,11 +683,16 @@ Drie-tier hiërarchie in de signal-card:
 - Absolute RSSI-bar met gradient rood (-120) → oranje (-80) → groen (-40)
 
 **Tier 2 — link-kwaliteit metrics**:
-- **SNR** (Signal-to-Noise Ratio) in dB. LoRa kan tot -20 dB SNR
-  decoderen (signaal 100× zwakker dan ruis) wat normaal onmogelijk
-  is voor andere modulatie-schema's. Positieve SNR betekent gezonde
-  link, negatieve SNR betekent marginaal — packets kunnen verloren
-  gaan. Operator gebruikt dit als vroege waarschuwing voor verlies.
+- **Signaalgetrouwheid** (in het dashboard zo genoemd; technisch de
+  SNR of signal-to-noise ratio) in dB. LoRa kan tot -20 dB decoderen —
+  een signaal 100× zwakker dan de ruis, wat voor andere
+  modulatie-schema's onmogelijk is. Positief betekent een gezonde
+  link, negatief betekent marginaal en packets kunnen wegvallen. De
+  operator gebruikt dit als vroege waarschuwing.
+
+  De term SNR is na de eerste gebruikerstest vervangen: geen van beide
+  verdelgers kon hem verklaren. Zie de gebruikerstesten in de
+  Roadmap.
 - **Laatste packet**: tijd sinds laatste succesvol ontvangen packet.
   Bij stilte > 3 seconden zakt RSSI naar de silence-floor van
   -120 dBm; teller blijft oplopen tot er weer een packet binnenkomt.
@@ -658,7 +739,14 @@ DIO0-interrupts te gebruiken voor RxDone events, maar `add_event_detect`
 in `rpi-lgpio` (de drop-in vervanger van `RPi.GPIO` op Pi OS Bookworm)
 werkt niet betrouwbaar voor SPI-IRQ patronen. Daarom polleert
 `LoRaSource._rx_loop` elke 50 ms het `RegIrqFlags` register direct.
-Bij 1 Hz beacon-rate is dat ruim genoeg en kost geen merkbare CPU-tijd.
+Bij de 2 Hz beacon-rate is dat ruim genoeg — tien pollingrondes per
+verwacht packet — en het kost geen merkbare CPU-tijd.
+
+> Dit is ook waarom het waargenomen pakketverlies (1,5-1,9 Hz in plaats
+> van 2 Hz tijdens de doorvluchten) niet aan de ontvangstlus kan liggen:
+> die kan een 2 Hz-beacon simpelweg niet missen. Het verlies zit op
+> radioniveau of bij de zender. Zie [Roadmap](#roadmap) — CRC-fouten
+> tellen is de eerste stap om dat uit elkaar te halen.
 
 ### Hardware-quirk: bedrading-stabiliteit
 
@@ -669,6 +757,60 @@ gefixt door DuPont-kabels visueel te inspecteren en aan te drukken op
 beide aansluitingen (Pi GPIO header én Ra-01 pads). Voor veldwerk zou
 de module hersolderd of mechanisch gestabiliseerd moeten worden om dit
 tijdens een missie te vermijden.
+
+---
+
+## Zoekalgoritme
+
+De volledige spec staat in
+[`docs/zoekalgoritme-ontwerp.md`](docs/zoekalgoritme-ontwerp.md): elke
+parameter met zijn herkomst, het accu-budget, de faalgevallen, en per
+veldvlucht wat er is gewijzigd. Hieronder alleen de kern.
+
+`START MISSIE` op het dashboard start `search.py` in een aparte thread.
+Die doorloopt een toestandscontrole en vijf fasen:
+
+| fase | wat er gebeurt |
+|---|---|
+| **0 — hovertest** | 5 s stilhangen op zoekhoogte en uitlezen wat de vluchtcontroller zelf meet: trilling, motorbalans, clipping, en de draai tijdens de klim. Deugt het niet, dan LAND op het opstijgpunt zonder één meter te vliegen |
+| **1 — peilen** | 12 stops van 30° op het vaste kompasraster. Per hoek stilstaand 5 packets meten. De richting komt uit het **zwaartepunt** van de lob, niet uit de sterkste hoek |
+| **2 — verifiëren** | neus op de kandidaat, 10 m die kant op, opnieuw meten. ≥ 3 dB sterker = echte bron, anders verwerpen |
+| **3 — doorvliegen** | één doorlopende vlucht op 0,5 m/s dwars over de bron heen, continu metend |
+| **4 — terugkruising** | 180° draaien en dezelfde lijn terug. Het middelpunt van de twee kruisingen heft een systematische meetvertraging op |
+| **5 — afronden** | terug naar het opstijgpunt op zoekhoogte, positie naar de coördinaat-log met betrouwbaarheidsklasse |
+
+Drie ontwerpkeuzes zijn tegen-intuïtief en staan er omdat het veld ze
+heeft afgedwongen:
+
+- **Stilstaand meten, niet al draaiend.** Meetwaarde en koers komen uit
+  bronnen met verschillende ververssnelheden; bij een draaiende drone
+  hoort een meetwaarde daardoor bij geen enkele hoek.
+- **Het zwaartepunt, niet de piek.** De lob is 150-212° breed en de
+  variatie erbinnen is even groot als de ruis. De sterkste hoek nemen
+  zat er op twee vluchten 76° en 84° naast; het zwaartepunt haalde
+  1,8° tot 11,5°.
+- **Doorvliegen, niet naar de bron toe kruipen.** Een gradiënt tussen
+  twee stappen is ~1,5 dB en de ruis is ~2,5 dB — je stuurt dan op
+  ruis. De signaalinstort bij het passeren is 5,7 dB over 3 m en dus
+  ruim boven de ruis.
+
+Verwante modules: `pattern.py` neemt een volledig stralingsdiagram op
+(36 × 10°), `approach.py` doet een rechte nadering. Beide zijn gebruikt
+om de meetgegevens te verzamelen waarop `search.py` is gebouwd.
+
+### Tests
+
+De testsuites draaien zonder drone, tegen een nagebouwde MAVLink- en
+signaalbron in `tests/sim.py`:
+
+```bash
+python3 tests/test_eenheden.py     # ~1 s
+python3 tests/test_vlucht.py       # ~3 min, vier volledige vluchten
+```
+
+Ze gebruiken de **echte gemeten waarden** uit de vluchtlogs, niet
+verzonnen getallen, en schrijven naar `tests/uitvoer/`. `search.DATA_DIR`
+wordt daarbij omgezet zodat `data/` nooit wordt aangeraakt.
 
 ---
 
@@ -867,11 +1009,42 @@ incrementele stap zonder dependencies te hoeven introduceren.
 
 ### Afgerond
 
-- Autonome demo-missie via het dashboard:
+- **Autonoom zoekalgoritme** (`search.py`) — zie
+  [Zoekalgoritme](#zoekalgoritme):
+  - Toestandscontrole vóór het zoeken: 5 s stilhangen en afkeuren op
+    trilling, motorbalans, clipping van de versnellingsmeter en
+    ongevraagde draai tijdens de klim. Bij afkeuring LAND op het
+    opstijgpunt zonder één meter te vliegen
+  - Vijf fasen: stapsgewijs peilen (12 × 30°, stilstaand gemeten),
+    richting verifiëren over 10 m, doorvliegen dwars over de bron,
+    terugkruisen, en afronden met een gelogde positie
+  - Kandidaatkeuze op het **zwaartepunt** van de antennelob in plaats
+    van de sterkste hoek; acht alternatieve schatters getoetst tegen
+    dezelfde veldmetingen
+  - Betrouwbaarheidsklasse (hoog / midden / laag) uit de spreiding
+    tussen de twee kruisingen, meegegeven aan de coördinaat-log
+  - Elke vlucht schrijft een CSV met de volledige meetreeks en de
+    toestandswaarden in de kop
+  - Drie keer herzien op grond van veldvluchten; elke wijziging met
+    bronvermelding vastgelegd in `docs/zoekalgoritme-ontwerp.md` §9
+- Rotatiemeting (`pattern.py`) — volledig stralingsdiagram opnemen in
+  36 stappen van 10°, de meetreeks waarop het peilen is gebouwd
+- Rechte nadering (`approach.py`) — meet wat het signaal doet bij het
+  naderen en passeren van de bron
+- Testsuites die zonder drone draaien (`tests/`), tegen een nagebouwde
+  MAVLink- en signaalbron, met de echte gemeten waarden uit de
+  vluchtlogs
+- Veldcampagne: zeven veldsessies, dertien vluchten, met de beacon
+  telkens op een vooraf bekende positie zodat de peilfout in graden
+  becijferd kon worden
+- Autonome demo-missie via het dashboard (nu de eenvoudige
+  voorloper, achter `start_demo_mission` vanuit de console):
   - Voorgeprogrammeerde sequentie: opstijgen 1,5 m → hover → 360°
     draai → 2 m vooruit → hover → landen (auto-disarm)
-  - START MISSIE-knop plus noodknoppen STOP & HANG (LOITER), RTL en
-    LAND NU als backup voor de zender-switch
+  - Was de vlucht die bewees dat de Pi commando's kon sturen over de
+    USB-C-verbinding; `START MISSIE` draait sindsdien het zoekalgoritme
+  - Noodknoppen STOP & HANG (LOITER), RTL en LAND NU als backup voor
+    de zender-switch
   - Pre-flight statusblok (GPS-fix, satellieten, RTL-hoogte) voordat
     de missie start
   - Veiligheidsmodel: de zender heeft altijd voorrang. Gaat de drone
@@ -977,16 +1150,46 @@ incrementele stap zonder dependencies te hoeven introduceren.
   - Gedeelde `nominatim.js` utility voor consistente debounce en
     rate-limit-handling tussen meerdere consumers in het dashboard
 
+- Gebruikersonderzoek met de doelgroep — twee testsessies met erkende
+  hoornaarverdelgers, die het dashboard zonder uitleg vooraf moesten
+  bedienen. Wat eruit voortkwam en in de interface zit:
+  - **Tabbladen** (Veld / Thermisch / Coördinaten) zodat de kern op één
+    scherm past — scrollen werd niet spontaan ontdekt
+  - **SNR hernoemd naar "signaalgetrouwheid"**; geen van beide
+    deelnemers kon de afkorting verklaren
+  - **Balk met kleurindicatie** voor signaalsterkte en
+    signaalgetrouwheid, geschaald op het werkelijk gemeten bereik —
+    de deelnemers stelden zelf een kleurenbalk voor boven een getal
+  - **Instelbare zoekhoogte**, nadat ze aankaartten dat populieren 30
+    tot 50 m halen
+  - **"Drone pad" hernoemd naar "Afgelegde weg"** — de functie werd als
+    zeer waardevol beoordeeld, maar de naam vertelde dat niet
+  - **Downloadknop ook bij de coördinatenlijst**, op de plek waar ze
+    hem zochten
+  - Statusvensters in de navbar ontdaan van jargon (TELEM2, SSID,
+    wlan1, "3D fix") ten gunste van gewone taal
+
 ### In planning
 
-- Layout-finetuning zodat alle cards exact passen op 1920 × 1080
-  zonder scrollen, nu alle hardware-componenten geïntegreerd zijn
-- Besturing card collapse-toggle (mode-knoppen verbergen tijdens vlucht
-  om ruimte vrij te maken voor kaart en warmtebeeld)
 - Ra-01 module hersolderen of mechanisch stabiliseren om tijdens
   veldwerk geen contact-issues te krijgen
 - Range-test in vrij veld met TX-power 20 dBm op LiPo om realistische
-  bereik-cijfers te krijgen voor het thesis-rapport
+  bereik-cijfers te krijgen voor het thesis-rapport. Alle huidige
+  metingen zijn op 2 dBm gedaan
+- Polarisatietest om het 45 dB link-tekort te lokaliseren: as van de
+  beacon-cilinder evenwijdig aan de **elementen** van de Yagi, drone
+  90° kantelen, RSSI aflezen. Twee minuten werk, en het bepaalt de
+  peilnauwkeurigheid van het hele systeem
+- CRC-fouten tellen in de ontvangstlus. Tijdens de doorvluchten komt
+  ~driekwart van de verwachte packets binnen; zonder die teller is
+  "wel ontvangen maar corrupt" niet te scheiden van "er kwam niets"
+- Onderscheid tussen ingestelde zoekhoogte en actuele vlieghoogte
+  duidelijker maken in het dashboard — kwam uit de tweede
+  gebruikerstest
+- Herbouw van het droneplatform (frame, motoren, ESC's), met de
+  volledige radioketen ongewijzigd mee zodat alle eerdere metingen
+  vergelijkbaar blijven. De toestandscontrole uit fase 0 dient als
+  acceptatietest tegen de vastgelegde basislijn
 
 ### Toekomstige uitbreidingen (visie, niet gepland)
 

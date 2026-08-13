@@ -1,0 +1,11 @@
+# VespaTrack zoekvlucht (search.py)
+# meetmoment: 2026-08-04 17:09:38
+# zoekhoogte: 2.5 m
+# GPS-startpositie: lat 50.7591023, lon 4.2258391
+# peiling fase 1: stapsgewijs, 12 hoeken van 30 graden, stilstaand gemeten
+# metingen per hoek: 5
+# beacon zendvermogen: 2 dBm
+# lora config: SF7 / BW125 kHz / 433.2 MHz
+# hovertest: trilling max 19.4, gem 15.0; motoren 380 PWM uit elkaar; clipping 0; klim-yawdrift 82° -> AFGEKEURD: motoren 380 PWM uit elkaar > 200, 82° ongevraagd gedraaid tijdens de klim > 30°
+# fase 1, 2 en 3 = STILSTAANDE medianen (1 rij per meetpunt); alleen fase 4 logt continu tijdens de pass
+fase,t_s,tijdstip,gps_lat,gps_lon,gps_alt,heading,rssi,snr,n,opmerking

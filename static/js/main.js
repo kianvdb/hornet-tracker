@@ -40,8 +40,10 @@
        window.registerCoreSocketHandlers();          // connect / disconnect / status_update
         window.registerCommandResultHandler();        // arm/disarm/mode feedback
         window.registerBaselineStatusHandler();       // baseline reset knop state
-        window.registerMissionHandlers();             // missie voortgang (mission_update)
-        window.registerMetingHandlers();              // stralingsdiagram (meting_update)
+        window.registerMissionHandlers();             // demo-missie voortgang (mission_update)
+        window.registerMetingHandlers();              // zoekvlucht + metingen (meting_update)
+        window.registerLogEntryHandler();             // beaconpositie van de zoekvlucht
+        window.registerSearchDirectionHandler();      // volgende zet op de kaart
         window.registerPopoverOutsideClick();
 
         console.log('[main] Klaar.');

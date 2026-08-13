@@ -18,9 +18,10 @@ Toekomstige LoRa ontvanger (Ra-01 via SPI):
 Kalibratie van beacon v2 (zie beacon.ino):
   - SF9, BW 125 kHz, 433 MHz, ~200ms time-on-air, elke 500ms
 """
-import mission  # onze demo-missie module
+import mission  # demo-missie (terugval voor de verdediging, geen knop meer)
 import pattern  # stralingsdiagram-meting (rotatie, ontwikkelgereedschap)
 import approach  # vooruit-nadering van de beacon (ontwikkelgereedschap)
+import search  # het zoekalgoritme achter de START MISSIE-knop
 from flask import Flask, render_template, jsonify, request, send_file
 import io
 import json
@@ -136,6 +137,11 @@ status = {
     'telem_rssi_local': 0, 'telem_rssi_remote': 0,
     'telem_noise_local': 0, 'telem_noise_remote': 0,
     'telem_quality': 0, 'telem_txbuf': 0,
+
+    # Toestandsbewaking van het toestel (VIBRATION / SERVO_OUTPUT_RAW).
+    # Gebruikt door de hovertest in search.py; -1 = nog niets ontvangen.
+    'vibe_x': -1.0, 'vibe_y': -1.0, 'vibe_z': -1.0, 'vibe_clip': 0,
+    'motor_pwm': [],
 
 # LoRa-specifieke velden (stub voor toekomst)
     'lora_packet_count': 0,
@@ -711,7 +717,11 @@ class LoRaSource(SignalSource):
       - lora_snr                SNR van laatste packet in dB (echte waarde)
     """
 
-    POLL_INTERVAL = 0.05    # 50 ms — fijn genoeg voor 1 Hz beacon
+    # 50 ms = tien pollingrondes per verwacht packet bij de 2 Hz beacon.
+    # Daarom kan het waargenomen pakketverlies (1,5-1,9 Hz tijdens de
+    # doorvluchten) niet aan deze lus liggen; het zit op radioniveau of
+    # bij de zender. Zie docs/zoekalgoritme-ontwerp.md §8.
+    POLL_INTERVAL = 0.05
     SILENCE_FLOOR = -120.0  # dBm — value bij stilte >3s
     SILENCE_TIMEOUT = 3.0   # sec zonder packet -> floor
 
@@ -1169,6 +1179,23 @@ def mavlink_loop():
                     status['altitude'] = round(msg.relative_alt / 1000.0, 2)
                     if msg.hdg != 65535:
                         status['heading'] = round(msg.hdg / 100.0, 1)
+                elif msg_type == 'VIBRATION':
+                    # Trillingsniveau per as, plus de clipping-tellers van de
+                    # accelerometers. ArduPilot-richtlijn: < 30 goed, 30-60
+                    # twijfelachtig, > 60 een probleem. Wordt gebruikt door de
+                    # hovertest in search.py.
+                    status['vibe_x'] = round(msg.vibration_x, 1)
+                    status['vibe_y'] = round(msg.vibration_y, 1)
+                    status['vibe_z'] = round(msg.vibration_z, 1)
+                    status['vibe_clip'] = (msg.clipping_0 + msg.clipping_1
+                                           + msg.clipping_2)
+                elif msg_type == 'SERVO_OUTPUT_RAW':
+                    # PWM naar de vier motoren. Het VERSCHIL tussen de motoren
+                    # bij stilhangen zegt of het toestel in balans is: een
+                    # gezonde quad zit binnen enkele tientallen PWM, en op de
+                    # vlucht die eindigde in een val stond er 103 PWM tussen.
+                    status['motor_pwm'] = [msg.servo1_raw, msg.servo2_raw,
+                                           msg.servo3_raw, msg.servo4_raw]
                 elif msg_type in ('RADIO_STATUS', 'RADIO'):
                     last_radio_status = now
                     status['telem_connected'] = True
@@ -2006,21 +2033,92 @@ def handle_set_mode(data):
 # MISSIE + NOODKNOPPEN (demo autonome vlucht)
 # ============================================
 
+def log_beacon_positie(lat, lon, alt, notities):
+    """
+    Schrijf een door search.py gevonden beaconpositie in de coördinaat-log
+    en meld hem aan het dashboard.
+
+    Server-side en niet vanuit de browser, want de vlucht loopt door of er
+    nu iemand naar het scherm kijkt of niet: een operator die tijdens de
+    zoekvlucht zijn telefoon vergrendelt mag de coördinaat niet kwijtraken.
+    De browser krijgt het resultaat via 'log_entry_added' en tekent de pin
+    er live bij; komt hij later terug, dan staat de entry er gewoon al.
+    """
+    from datetime import datetime
+
+    lat = round(float(lat), 7)
+    lon = round(float(lon), 7)
+    nu = datetime.now()
+
+    # Zelfde velden als POST /api/log, inclusief het adres: de verdelger
+    # krijgt liever een straatnaam dan alleen coördinaten.
+    entry = {
+        'id':      generate_entry_id(),
+        'lat':     lat,
+        'lon':     lon,
+        'alt':     float(alt or 0),
+        'time':    nu.strftime('%H:%M:%S'),
+        'date':    nu.isoformat(),
+        'source':  'drone',
+        'status':  'gemeld',
+        'notes':   notities,
+        'address': reverse_geocode(lat, lon) or '',
+    }
+
+    entries = load_log()
+    entries.append(entry)
+    if not save_log(entries):
+        print('!! beaconpositie kon niet worden opgeslagen')
+        return None
+
+    socketio.emit('log_entry_added', entry)
+    print(f'Beaconpositie gelogd: {lat}, {lon}')
+    return entry
+
+
 @socketio.on('start_mission')
 def handle_start_mission(data=None):
     """
-    START MISSIE-knop. Start de zoeksequentie in een aparte thread.
+    START MISSIE-knop. Start de ZOEKVLUCHT (search.py) in een aparte thread.
+
+    Deze knop startte eerder de autonome demo-missie (mission.py). Die missie
+    bestaat nog — zie handle_start_demo_mission hieronder — maar hangt niet
+    meer aan een knop: hij bewijst alleen dat autonoom vliegen werkt, en de
+    zoekvlucht is wat het toestel eigenlijk moet doen.
 
     Frontend stuurt {'altitude': <float>} mee — de zoekhoogte uit het
-    dashboard-invoerveld. De hoogte wordt server-side opnieuw geclampt
-    in mission.py; de browser-clamp is alleen UX.
+    dashboard-invoerveld, hergebruikt als starthoogte voor het peilen. De
+    hoogte wordt server-side opnieuw geclampt; de browser-clamp is alleen UX.
 
-    data=None als default zodat een emit zonder payload (oude client,
-    of een handmatige emit vanuit de console) niet crasht.
+    data=None als default zodat een emit zonder payload (oude client, of een
+    handmatige emit vanuit de console) niet crasht.
     """
     payload = data or {}
     altitude = payload.get('altitude')
-    print(f'START MISSIE ontvangen van frontend (hoogte {altitude} m)')
+    print(f'START ZOEKVLUCHT ontvangen van frontend (zoekhoogte {altitude} m)')
+    success, message = search.start_search(
+        status, get_mav_connection, socketio.emit, altitude,
+        log_fn=log_beacon_positie
+    )
+    socketio.emit('command_result', {'success': success, 'message': message})
+
+
+@socketio.on('start_demo_mission')
+def handle_start_demo_mission(data=None):
+    """
+    De autonome demo-missie (mission.py): opstijgen, draaien, vooruit, landen.
+
+    Bewust NIET aan een knop gekoppeld. Hij reageert niet op signalen en is
+    dus geen veldfunctie, maar hij is wel de terugval voor de thesis-
+    verdediging: als de zoekvlucht op de dag zelf niet wil (geen beacon, geen
+    fix, wind), toont dit nog steeds een werkende autonome vlucht.
+
+    Starten vanuit de browserconsole:
+        socket.emit('start_demo_mission', {altitude: 2.5})
+    """
+    payload = data or {}
+    altitude = payload.get('altitude')
+    print(f'START DEMO-MISSIE ontvangen (hoogte {altitude} m)')
     success, message = mission.start_mission(
         status, get_mav_connection, socketio.emit, altitude
     )
@@ -2040,23 +2138,6 @@ def handle_start_meting(data=None):
     print(f'START METING ontvangen van frontend (hoogtes {hoogtes})')
     success, message = pattern.start_meting(
         status, get_mav_connection, socketio.emit, hoogtes)
-    socketio.emit('command_result', {'success': success, 'message': message})
-
-
-@socketio.on('start_approach')
-def handle_start_approach(data=None):
-    """
-    Start de vooruit-nadering van de beacon (ontwikkelgereedschap).
-
-    Dit is de knop die de rotatiemeting verving. data=None als default zodat
-    een emit zonder payload niet crasht; de hoogte wordt in approach.py naar
-    2/3/4 m gerond.
-    """
-    payload = data or {}
-    hoogte = payload.get('hoogte', 3.0)
-    print(f'START NADERING ontvangen van frontend (hoogte {hoogte})')
-    success, message = approach.start_meting(
-        status, get_mav_connection, socketio.emit, hoogte)
     socketio.emit('command_result', {'success': success, 'message': message})
 
 
@@ -2085,6 +2166,19 @@ def handle_mission_land():
 
 @socketio.on('shutdown')
 def handle_shutdown():
+    """
+    Afsluiten-knop: een echte systeem-shutdown, geen service-stop.
+
+    KLOK: de Pi heeft geen RTC, dus de tijd moet vóór het uitgaan bewaard
+    worden. Hier staat bewust geen eigen 'fake-hwclock save' — `shutdown`
+    start de systemd shutdown-transactie en fake-hwclock-save.service hangt
+    daar al in (shutdown.target.wants, Before=shutdown.target). Geverifieerd
+    in het journal van deze Pi. Het gebeurt vanzelf; de operator hoeft er
+    niet aan te denken en hoeft er dus ook niets van te zien.
+
+    Alleen de stekker eruit trekken omzeilt dit — dan verliest de klok tot
+    een uur (fake-hwclock-save.timer draait hourly).
+    """
     print('Shutdown aangevraagd')
     socketio.emit('shutdown_status', {'message': 'Pi wordt afgesloten...'})
     time.sleep(1)

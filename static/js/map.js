@@ -244,6 +244,100 @@ function toggleTrail() {
 }
 
 // ============================================
+// ZOEKRICHTING — de volgende zet, vóór hij wordt uitgevoerd
+// ============================================
+//
+// search.py kondigt elke beweging aan zodra de richting gekozen is en
+// wacht dan kort voor hij vertrekt. Die aankondiging tekenen we hier als
+// een stippellijn vanaf de drone naar het doelpunt.
+//
+// Waarom dat de moeite is: zonder deze lijn ziet de operator alleen dát de
+// drone beweegt en moet hij achteraf raden waarheen. Met de lijn weet hij
+// de zet vóórdat hij gebeurt en kan hij met de zender ingrijpen vóór het
+// toestel vertrekt in plaats van erna. Het maakt een autonome vlucht
+// volgbaar in plaats van iets dat je overkomt.
+//
+// De lijn is bewust anders dan de trail (oranje, doorlopend, achteraf):
+// blauw en gestippeld = een voornemen, geen afgelegde weg.
+
+const RICHTING_KLEUR = '#5e8bff';
+
+let richtingLijn = null;
+let richtingPunt = null;
+
+
+/**
+ * Teken of wis de aangekondigde richting.
+ *
+ * @param {Object} data  {actief, lat, lon, bearing, afstand_m, fase, toelichting}
+ */
+function toonZoekRichting(data) {
+    if (!map) return;
+
+    if (!data || !data.actief) {
+        wisZoekRichting();
+        return;
+    }
+
+    const doel = verplaatsCoord(data.lat, data.lon, data.bearing, data.afstand_m);
+    const punten = [[data.lat, data.lon], doel];
+    const label = `Fase ${data.fase} · ${Math.round(data.bearing)}° · `
+                + `${data.afstand_m} m — ${data.toelichting}`;
+
+    if (!richtingLijn) {
+        richtingLijn = L.polyline(punten, {
+            color: RICHTING_KLEUR, weight: 3, opacity: 0.9, dashArray: '8 6'
+        }).addTo(map);
+        richtingPunt = L.circleMarker(doel, {
+            radius: 6, color: RICHTING_KLEUR, weight: 2,
+            fillColor: RICHTING_KLEUR, fillOpacity: 0.35
+        }).addTo(map);
+    } else {
+        richtingLijn.setLatLngs(punten);
+        richtingPunt.setLatLng(doel);
+    }
+
+    richtingPunt.bindTooltip(label, {
+        permanent: true, direction: 'right', offset: [8, 0],
+        className: 'richting-tooltip'
+    }).openTooltip();
+}
+
+
+/** Haal de richtingslijn van de kaart. */
+function wisZoekRichting() {
+    if (richtingLijn) { map.removeLayer(richtingLijn); richtingLijn = null; }
+    if (richtingPunt) { map.removeLayer(richtingPunt); richtingPunt = null; }
+}
+
+
+/**
+ * Verschuif een coördinaat over een kompasrichting en afstand.
+ *
+ * Platte-aarde benadering, dezelfde als search._noord_oost aan de
+ * serverkant: over tientallen meters is de fout kleiner dan de GPS-ruis.
+ * Kompasrichting telt met de klok mee vanaf noord, dus noord = cos en
+ * oost = sin.
+ */
+function verplaatsCoord(lat, lon, bearing, afstandM) {
+    const r = bearing * Math.PI / 180;
+    const dNoord = afstandM * Math.cos(r);
+    const dOost  = afstandM * Math.sin(r);
+    return [
+        lat + dNoord / 111320.0,
+        lon + dOost / (111320.0 * Math.cos(lat * Math.PI / 180))
+    ];
+}
+
+
+/** Luister naar de richting-aankondigingen van search.py. */
+function registerSearchDirectionHandler() {
+    if (!window.socket) return;
+    window.socket.on('search_richting', toonZoekRichting);
+}
+
+
+// ============================================
 // ACCESSORS (voor andere modules)
 // ============================================
 
@@ -318,3 +412,4 @@ window.toggleTrail     = toggleTrail;
 window.getCurrentMap   = getCurrentMap;
 window.hasFix          = hasFix;
 window.initMapAddressSearch = initMapAddressSearch;
+window.registerSearchDirectionHandler = registerSearchDirectionHandler;

@@ -1,0 +1,28 @@
+# VespaTrack zoekvlucht (search.py)
+# meetmoment: 2026-08-01 21:08:04
+# zoekhoogte: 2.5 m
+# GPS-startpositie: lat 50.7592074, lon 4.2257302
+# peiling fase 1: stapsgewijs, 12 hoeken van 30 graden, stilstaand gemeten
+# metingen per hoek: 5
+# beacon zendvermogen: 2 dBm
+# lora config: SF7 / BW125 kHz / 433.2 MHz
+# fase 1: stapsgewijs, 12 hoeken x 30°, 12 met signaal
+# kandidaten: 209° (+7.8 dB)
+# fase 2: kandidaat 209° verworpen (-4.0 dB)
+# afgebroken: Alle kandidaten verworpen (209°)
+# fase 1, 2 en 3 = STILSTAANDE medianen (1 rij per meetpunt); alleen fase 4 logt continu tijdens de pass
+fase,t_s,tijdstip,gps_lat,gps_lon,gps_alt,heading,rssi,snr,n,opmerking
+peilen,0.0,21:05:58,50.7592077,4.2257287,2.59,75.3,-95.0,7.5,5,hoek 0°
+peilen,15.6,21:06:13,50.7592072,4.2257292,2.53,28.1,-99.0,4.2,5,hoek 30°
+peilen,21.64,21:06:19,50.7592072,4.2257284,2.42,61.0,-96.0,6.8,5,hoek 60°
+peilen,27.13,21:06:25,50.7592079,4.2257293,2.4,93.1,-95.0,7.0,5,hoek 90°
+peilen,33.16,21:06:31,50.7592073,4.2257291,2.46,119.5,-93.0,7.5,5,hoek 120°
+peilen,39.24,21:06:37,50.7592066,4.2257289,2.57,149.2,-93.0,7.2,5,hoek 150°
+peilen,45.78,21:06:44,50.7592072,4.2257294,2.49,182.3,-94.0,6.8,5,hoek 180°
+peilen,53.84,21:06:52,50.7592069,4.2257288,2.44,208.9,-93.0,7.8,5,hoek 210°
+peilen,60.34,21:06:58,50.7592073,4.2257287,2.58,242.1,-100.0,3.0,5,hoek 240°
+peilen,68.4,21:07:06,50.7592072,4.2257292,2.75,269.6,-99.0,3.5,5,hoek 270°
+peilen,76.41,21:07:14,50.7592078,4.2257293,2.42,300.9,-99.0,4.2,5,hoek 300°
+peilen,83.45,21:07:21,50.759207,4.2257286,2.35,328.9,-101.0,0.8,5,hoek 330°
+verifieren,105.06,21:07:43,50.759207,4.2257289,2.49,208.8,-94.0,7.2,5,kandidaat 209° voor
+verifieren,116.08,21:07:54,50.7591679,4.2256954,2.52,207.6,-98.0,5.8,5,kandidaat 209° na
