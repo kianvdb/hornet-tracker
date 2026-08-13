@@ -267,22 +267,21 @@ function updateGpsNavbar(data) {
     pixEl.textContent = data.pixhawk_connected ? 'ONLINE' : 'OFFLINE';
     pixEl.style.color = data.pixhawk_connected ? '#4ade80' : '#f87171';
 
+    // "3D Fix" was jargon: het zegt de operator niet of hij kan opstijgen.
+    // Nu in gewone taal, want dat is de enige vraag die hij hier heeft.
     const fixEl = document.getElementById('pop-gps-fix');
-    fixEl.textContent = data.gps_fix ? '3D Fix' : 'Geen fix';
+    fixEl.textContent = data.gps_fix ? 'Betrouwbaar' : 'Nog geen positie';
     fixEl.style.color = data.gps_fix ? '#4ade80' : '#f87171';
 
     document.getElementById('pop-gps-sats').textContent = data.gps_satellites || '--';
 
-    // Lat/Lon alleen tonen bij echte fix (niet 0,0)
-    if (data.gps_fix && data.gps_lat && data.gps_lon) {
-        document.getElementById('pop-gps-lat').textContent = data.gps_lat.toFixed(7) + '°';
-        document.getElementById('pop-gps-lon').textContent = data.gps_lon.toFixed(7) + '°';
-        document.getElementById('pop-gps-alt').textContent = (data.altitude || 0).toFixed(1) + ' m';
-    } else {
-        document.getElementById('pop-gps-lat').textContent = '--';
-        document.getElementById('pop-gps-lon').textContent = '--';
-        document.getElementById('pop-gps-alt').textContent = '--';
-    }
+    // Hoogte alleen tonen bij een echte fix (niet 0,0). Latitude en longitude
+    // stonden hier ook; die zijn uit de popover gehaald omdat de kaart de
+    // positie al toont.
+    document.getElementById('pop-gps-alt').textContent =
+        (data.gps_fix && data.gps_lat && data.gps_lon)
+            ? (data.altitude || 0).toFixed(1) + ' m'
+            : '--';
 }
 
 

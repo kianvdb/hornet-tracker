@@ -717,7 +717,11 @@ class LoRaSource(SignalSource):
       - lora_snr                SNR van laatste packet in dB (echte waarde)
     """
 
-    POLL_INTERVAL = 0.05    # 50 ms — fijn genoeg voor 1 Hz beacon
+    # 50 ms = tien pollingrondes per verwacht packet bij de 2 Hz beacon.
+    # Daarom kan het waargenomen pakketverlies (1,5-1,9 Hz tijdens de
+    # doorvluchten) niet aan deze lus liggen; het zit op radioniveau of
+    # bij de zender. Zie docs/zoekalgoritme-ontwerp.md §8.
+    POLL_INTERVAL = 0.05
     SILENCE_FLOOR = -120.0  # dBm — value bij stilte >3s
     SILENCE_TIMEOUT = 3.0   # sec zonder packet -> floor
 

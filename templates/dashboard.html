@@ -56,7 +56,10 @@
                         <span id="pop-pixhawk-status">--</span>
                     </div>
                     <div class="popover-hint">
-                        Pixhawk telemetrie via USB-TTL (TELEM2 @ 57600 baud)
+                        Eén volledige zoekvlucht kost ruim vier minuten en past
+                        precies op één lading. Land ruim voor de accu leeg is —
+                        de drone waarschuwt zelf bij 14,0 V en gaat in
+                        noodprocedure bij 13,6 V.
                     </div>
                 </div>
             </div>
@@ -72,29 +75,23 @@
 
                 <div class="navbar-popover" id="wifi-popover">
                     <div class="popover-title">Pi ↔ Grondstation</div>
+                    <!-- Kwaliteit en meetwaarde op één regel: het woord zegt de
+                         operator wat hij moet doen, het getal is achtergrond. -->
                     <div class="popover-row">
-                        <span>RSSI</span>
-                        <span id="pop-wifi-rssi">-- dBm</span>
+                        <span>Verbinding</span>
+                        <span>
+                            <span id="pop-wifi-label">--</span>
+                            <span id="pop-wifi-rssi"
+                                  style="color:#888; font-size:0.85em; margin-left:6px;">-- dBm</span>
+                        </span>
                     </div>
                     <div class="popover-row">
-                        <span>Kwaliteit</span>
-                        <span id="pop-wifi-label">--</span>
-                    </div>
-                    <div class="popover-row">
-                        <span>Verbonden clients</span>
+                        <span>Verbonden apparaten</span>
                         <span id="pop-wifi-clients">0</span>
                     </div>
-                    <div class="popover-row">
-                        <span>Interface</span>
-                        <span id="pop-wifi-iface">wlan1</span>
-                    </div>
-                    <div class="popover-row">
-                        <span>SSID</span>
-                        <span>HornetTracker</span>
-                    </div>
                     <div class="popover-hint">
-                        Comfast MT7612U USB adapter met dual 6dBi antennes.
-                        Hotspot IP 192.168.4.1.
+                        Blijft de verbinding zwak, ga dan dichter bij de drone
+                        staan of houd de laptop in de richting van het toestel.
                     </div>
                 </div>
             </div>
@@ -111,7 +108,7 @@
                         <span id="pop-gps-pixhawk">--</span>
                     </div>
                     <div class="popover-row">
-                        <span>Fix status</span>
+                        <span>Positiebepaling</span>
                         <span id="pop-gps-fix">--</span>
                     </div>
                     <div class="popover-row">
@@ -119,20 +116,17 @@
                         <span id="pop-gps-sats">--</span>
                     </div>
                     <div class="popover-row">
-                        <span>Latitude</span>
-                        <span id="pop-gps-lat">--</span>
-                    </div>
-                    <div class="popover-row">
-                        <span>Longitude</span>
-                        <span id="pop-gps-lon">--</span>
-                    </div>
-                    <div class="popover-row">
                         <span>Hoogte</span>
                         <span id="pop-gps-alt">--</span>
                     </div>
+                    <!-- Latitude en longitude stonden hier ook. Weggehaald: de
+                         kaart toont de positie al, en losse coördinaten zeggen
+                         alleen iets als je ze uit het hoofd kent. -->
                     <div class="popover-hint">
-                        u-blox GPS via Pixhawk. Minimaal 6 satellieten en
-                        fix-type 3D voor betrouwbare positie.
+                        De drone heeft een betrouwbare positie nodig om zijn
+                        plaats vast te houden en zelf terug te keren. Wacht
+                        daarop voor je opstijgt — meestal één tot drie minuten
+                        na het aanzetten. Meer satellieten is beter.
                     </div>
                 </div>
             </div>
@@ -168,12 +162,12 @@
                 <button class="tab-btn" id="tab-thermal"
                         onclick="switchTab('thermal')"
                         role="tab" aria-selected="false">
-                    🌡️ Thermisch
+                    🌡️ Warmtecamera
                 </button>
                 <button class="tab-btn" id="tab-log"
                         onclick="switchTab('log')"
                         role="tab" aria-selected="false">
-                    📌 Log
+                    📌 Gelogde Posities
                 </button>
             </div>
 
@@ -265,7 +259,7 @@
         <button class="btn btn-danger" id="btn-end-mission"
                 onclick="missionRTL()"
                 title="Beëindig de missie: terug naar het opstijgpunt en landen">
-            🏠 EINDE MISSIE
+            🏠 STOP MISSIE
         </button>
     </div>
 </div>
@@ -276,7 +270,7 @@
 
           <div class="card">
                 <div class="thermal-header">
-                    <h2>🌡️ Thermisch Beeld</h2>
+                    <h2>Thermisch Beeld</h2>
                     <div class="thermal-palette-dropdown" id="thermal-palette-dropdown">
                         <button class="thermal-palette-trigger" id="thermal-palette-trigger"
                                 onclick="window.toggleThermalPaletteMenu(event)">
@@ -347,13 +341,18 @@
 
                 <div class="tab-panel" id="panel-log" role="tabpanel">
                     <div class="card">
-                        <h2>📌 Coördinaat Log</h2>
+                        <h2>Coördinaten </h2>
                         <div class="log-header">
                             <span class="log-count" id="log-count">0 punten</span>
+                            <!-- Zelfde actie als de knop onder de kaart; hier
+                                 binnen handbereik van de lijst zelf. -->
+                            <button class="btn btn-small btn-secondary"
+                                    onclick="exportLog()"
+                                    title="Download de gelogde dronepositie(s) als Excel-bestand">📊 Downloaden</button>
                             <button class="btn btn-small btn-danger" onclick="clearLog()">Wissen</button>
                         </div>
                         <div class="coord-log" id="coord-log">
-                            <div class="coord-empty">Klik "📌 Log Positie" om coördinaten op te slaan</div>
+                            <div class="coord-empty">Klik "📌 Log Drone Positie" om coördinaten op te slaan</div>
                         </div>
                     </div>
                 </div><!-- /panel-log -->
@@ -382,10 +381,10 @@
                     <div>Hoogte: <span id="map-alt">--</span> m</div>
                 </div>
                 <div class="map-controls">
-                    <button class="btn btn-small" onclick="logCoordinate()">📌 Log Positie</button>
-                    <button class="btn btn-small btn-secondary" onclick="toggleTrail()">🔄 Trail aan/uit</button>
+                    <button class="btn btn-small" onclick="logCoordinate()">📌 Log Drone Positie</button>
+                    <button class="btn btn-small btn-secondary" onclick="toggleTrail()">🔄 Afgelegde weg aan/uit</button>
                     <button class="btn btn-small btn-secondary" onclick="centerMap()">🎯 Centreer</button>
-                    <button class="btn btn-small btn-secondary" onclick="exportLog()">📊 Export Excel</button>
+                    <button class="btn btn-small btn-secondary" onclick="exportLog()">📊 Download Drone Posities</button>
                 </div>
             </div>
 
@@ -472,7 +471,7 @@
             <h3>📊 Logs exporteren naar Excel</h3>
 
             <div style="color:#aaa; font-size:0.9em; margin-bottom:14px;">
-                Selecteer welke entries je wil downloaden.
+                Selecteer welke posities je wil downloaden.
             </div>
 
             <!-- Selecteer alles toggle -->
