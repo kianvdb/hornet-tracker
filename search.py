@@ -1461,6 +1461,15 @@ def _run_search(status, get_mav, emit_fn, hoogte, log_fn):
         # een tak toe die we niet kunnen valideren.
         melden('guided', 'GUIDED-mode instellen...')
         mission._cmd_set_mode_guided(get_mav, mavutil)
+        # Eerst WACHTEN tot GUIDED bevestigd is. Meteen op de mode toetsen
+        # leest de vorige waarde en meldt onterecht een piloot-overname —
+        # zie mission._wacht_op_guided.
+        if not mission._wacht_op_guided(status):
+            melden('fout', 'GUIDED niet bevestigd door de vluchtcontroller — '
+                           'zoekvlucht afgebroken', active=False)
+            return
+        # Pas nu is de overname-detectie zinvol; deze wachttijd laat de
+        # mode-switch uitzweven vóór het armen.
         if not pattern._wacht(2, status):
             afbreken_door_piloot(); return
 

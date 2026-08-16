@@ -410,6 +410,50 @@
         </div>
     </div>
 
+    <!-- Bevestiging vóór een autonome zoekvlucht. De drone vertrekt hierna
+         zelfstandig; dit is het laatste moment waarop de operator kan
+         nadenken zonder haast. -->
+    <div class="modal" id="mission-modal">
+        <div class="modal-content" style="min-width: 420px; text-align: left;">
+            <h3 style="text-align:center;">🚀 Zoekvlucht starten?</h3>
+
+            <div style="background:#0f3460; padding:12px; border-radius:6px;
+                        margin-bottom:14px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                    <span>Zoekhoogte</span>
+                    <strong id="mission-modal-alt">-- m</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                    <span>GPS</span>
+                    <strong id="mission-modal-gps">--</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span>Batterij</span>
+                    <strong id="mission-modal-batt">--</strong>
+                </div>
+            </div>
+
+            <p style="margin:0 0 8px 0;">De drone gaat hierna <strong>zelfstandig
+               vliegen</strong>: opstijgen, rondkijken, en over de bron heen vliegen.</p>
+
+            <ul style="margin:0 0 14px 18px; padding:0; color:#ccc; font-size:0.92em;">
+                <li>Niemand binnen drie meter van de drone</li>
+                <li>Vrij zicht op het toestel gedurende de hele vlucht</li>
+                <li>De zender in de hand — wegschakelen van vluchtmodus
+                    stopt de missie onmiddellijk</li>
+            </ul>
+
+            <div id="mission-modal-warning"
+                 style="display:none; background:#5a2d00; border-radius:6px;
+                        padding:10px; margin-bottom:14px; font-size:0.92em;"></div>
+
+            <div class="btn-group" style="justify-content: flex-end;">
+                <button class="btn btn-secondary" onclick="hideModals()">Annuleren</button>
+                <button class="btn btn-success" onclick="confirmStartMission()">Starten</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Log-entry modal (verschijnt bij Log Positie of map-click) -->
     <div class="modal" id="log-modal">
         <div class="modal-content" style="min-width: 420px; text-align: left;">

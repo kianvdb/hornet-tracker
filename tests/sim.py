@@ -67,6 +67,11 @@ def versnel():
     approach.STAP_STABIEL_DUUR_S = 1.2
 
 
+# Hoe lang de vluchtcontroller erover doet om een modewissel te bevestigen.
+# Op de echte drone komt de nieuwe mode pas mee met de volgende HEARTBEAT.
+MODE_BEVESTIGING_S = 0.6
+
+
 class Sim:
     """Nep-drone met een beacon op een bekende plek."""
 
@@ -103,6 +108,7 @@ class Sim:
         self.params = []
         self.min_afstand = 1e9
         self.stop = False
+        self._mode_in_wacht = None      # (naam, moment waarop hij geldt)
         self._thread = threading.Thread(target=self._loop, daemon=True)
 
     def zet_toestand(self, gezond):
@@ -115,6 +121,20 @@ class Sim:
             self.status.update({'vibe_x': 20, 'vibe_y': 75, 'vibe_z': 30,
                                 'vibe_clip': 0,
                                 'motor_pwm': [1500, 1700, 1600, 1550]})
+
+    def mode_wordt(self, naam, na_s=0.0):
+        """Plan een modewissel die pas na `na_s` zichtbaar wordt in status."""
+        if na_s <= 0:
+            self.status['flight_mode'] = naam
+            self._mode_in_wacht = None
+        else:
+            self._mode_in_wacht = (naam, time.time() + na_s)
+
+    def _verwerk_mode(self):
+        """Laat een geplande modewissel doorwerken zodra zijn moment er is."""
+        if self._mode_in_wacht and time.time() >= self._mode_in_wacht[1]:
+            self.status['flight_mode'] = self._mode_in_wacht[0]
+            self._mode_in_wacht = None
 
     def afstand_tot_beacon(self):
         return approach._horizontale_afstand(
@@ -147,6 +167,7 @@ class Sim:
         volgend_packet = time.time()
         while not self.stop:
             time.sleep(dt)
+            self._verwerk_mode()
             if self.doel_hoogte > self.status['altitude']:
                 self.status['altitude'] = min(
                     self.doel_hoogte, self.status['altitude'] + 5.0 * dt)
@@ -238,8 +259,17 @@ class NepMav:
         self.mav = NepBerichten(sim)
 
     def set_mode(self, naam):
-        self.sim.status['flight_mode'] = naam
+        # De ECHTE Pixhawk werkt status['flight_mode'] niet meteen bij: het
+        # commando is fire-and-forget en de nieuwe mode komt pas mee met de
+        # volgende HEARTBEAT. Die vertraging hoort in de simulator, anders
+        # test hij een gunstiger wereld dan de werkelijkheid.
+        #
+        # Dit is niet theoretisch: doordat de simulator de mode onmiddellijk
+        # zette, liep de testsuite groen terwijl de operator in het veld twee
+        # keer op START MISSIE moest klikken — de eerste poging las de oude
+        # mode en meldde onterecht een piloot-overname.
         self.sim.commandos.append(('set_mode', naam))
+        self.sim.mode_wordt(naam, na_s=MODE_BEVESTIGING_S)
         if naam == 'RTL':
             self.sim.doel_lat = self.sim.slat
             self.sim.doel_lon = self.sim.slon
@@ -267,7 +297,7 @@ def draai_vlucht(sim, hoogte=2.5, timeout=180, overname_na=None):
     begin = time.time()
     while time.time() - begin < timeout:
         if overname_na is not None and time.time() - begin > overname_na:
-            sim.status['flight_mode'] = 'LOITER'
+            sim.mode_wordt('LOITER')   # zender = onmiddellijk
             overname_na = None
         if not search.get_search_state()['active']:
             break

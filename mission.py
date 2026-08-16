@@ -171,6 +171,37 @@ def _pilot_has_taken_over(status):
     return status.get('flight_mode') != 'GUIDED'
 
 
+def _wacht_op_guided(status, timeout_s=6.0):
+    """
+    Wacht tot de vluchtcontroller GUIDED daadwerkelijk bevestigt.
+
+    WAAROM DIT BESTAAT. `set_mode('GUIDED')` is fire-and-forget: het commando
+    gaat de deur uit, maar `status['flight_mode']` blijft de OUDE mode houden
+    tot `mavlink_loop` een HEARTBEAT met de nieuwe mode heeft verwerkt. Dat
+    duurt tot een halve seconde.
+
+    Wie meteen na het commando op "flight_mode != GUIDED" toetst — en dat is
+    precies wat `_pilot_has_taken_over` doet — leest dus de oude mode en
+    concludeert onterecht dat de piloot heeft overgenomen. Gevolg: de
+    operator moest twee keer op START MISSIE klikken. De eerste poging zette
+    de mode wél maar brak daarna af met een misleidende melding; de tweede
+    vond GUIDED al ingesteld en liep door.
+
+    De overname-detectie zelf is correct en blijft ongewijzigd — ze werd
+    alleen toegepast op een toestand die nog niet bijgewerkt was. Vanaf het
+    moment dat GUIDED bevestigd is, betekent elke andere mode weer echt dat
+    de zender heeft ingegrepen.
+
+    Returns True zodra GUIDED bevestigd is, False bij timeout.
+    """
+    einde = time.time() + timeout_s
+    while time.time() < einde:
+        if status.get('flight_mode') == 'GUIDED':
+            return True
+        time.sleep(0.2)
+    return False
+
+
 def _wait_with_pilot_check(seconds, status, get_mav):
     """
     Wacht 'seconds' seconden, maar controleer elke 0.2s of de piloot heeft
@@ -353,6 +384,13 @@ def _run_mission(status, get_mav, emit_fn, takeoff_alt_m):
         _set_state('guided', f'Overnemen op {hoogte} m...')
         emit_fn('mission_update', get_mission_state())
         _cmd_set_mode_guided(get_mav, mavutil)
+        # Wachten op bevestiging vóór de overname-detectie gaat gelden;
+        # zie _wacht_op_guided.
+        if not _wacht_op_guided(status):
+            _set_state('fout', 'GUIDED niet bevestigd door de vluchtcontroller — '
+                               'missie afgebroken', active=False)
+            emit_fn('mission_update', get_mission_state())
+            return
         if not _wait_with_pilot_check(2, status, get_mav):
             abort_if_pilot(); return
 

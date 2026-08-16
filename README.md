@@ -1232,4 +1232,5 @@ van Anthropic's Claude AI als pair-programming tool.
 
 - **Tool** Claude (Anthropic)
 - **Gesprek** <https://claude.ai/share/2ab5ba1f-5a95-46e3-920d-3d8ff4d12a5c>
-- **Datum** mei 2026
+              <https://claude.ai/share/44279bf8-833e-4d1e-8942-9bb817abc98f>
+- **Datum** mei - augustus 2026

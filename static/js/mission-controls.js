@@ -60,41 +60,71 @@ function readTakeoffAltitude() {
 }
 
 /**
- * Start de autonome zoekvlucht. We tonen meteen feedback; de echte voortgang
- * komt via meting_update events van de server (zie pattern-controls.js) —
- * hetzelfde kanaal als de metingen, zodat alles op één statusregel landt.
+ * Toon de bevestiging vóór de autonome zoekvlucht.
  *
- * De knop heet nog START MISSIE en start sinds de koppeling aan search.py
- * de zoekvlucht in plaats van de demo-missie. Die demo-missie bestaat nog
- * als terugval en start je vanuit de browserconsole:
+ * De knop start de vlucht NIET rechtstreeks. Na de bevestiging vertrekt de
+ * drone zelfstandig en vliegt hij minutenlang buiten handbereik; dit is het
+ * laatste moment waarop de operator rustig kan nakijken of de omgeving vrij
+ * is en of de zoekhoogte klopt. Een native confirm() volstond daar niet
+ * voor: die toont geen hoogte, geen GPS-status en geen batterij, en verscheen
+ * bovendien alleen wanneer de GPS al slecht was.
+ *
+ * De zoekhoogte komt uit het #mission-alt veld en gaat mee in de payload;
+ * search.py gebruikt hem als starthoogte voor het peilen en clampt hem
+ * opnieuw. Ook de GPS-controle hier is alleen UX — de server doet zijn eigen
+ * pre-flight, inclusief een beacon-check.
+ *
+ * De voortgang komt daarna via meting_update events van de server (zie
+ * pattern-controls.js), hetzelfde kanaal als de metingen, zodat alles op één
+ * statusregel landt.
+ *
+ * De knop heet nog START MISSIE en start sinds de koppeling aan search.py de
+ * zoekvlucht in plaats van de demo-missie. Die demo-missie bestaat nog als
+ * terugval en start je vanuit de browserconsole:
  *     socket.emit('start_demo_mission', { altitude: 2.5 })
- *
- * Veiligheid: we checken eerst de pre-flight status client-side zodat de
- * operator niet per ongeluk start zonder GPS-fix. De server checkt het nog
- * een keer (search.py pre-flight, inclusief een beacon-check), dus dit is
- * alleen UX.
- *
- * De zoekhoogte komt uit het #mission-alt veld en wordt meegestuurd in de
- * payload; search.py gebruikt hem als starthoogte voor het peilen en clampt
- * hem opnieuw.
  */
 function startMission() {
-    // Client-side pre-flight waarschuwing (server checkt ook)
     const lastStatus = window.lastKnownStatus || {};
-    const sats = lastStatus.gps_satellites || 0;
+    const sats   = lastStatus.gps_satellites || 0;
     const hasFix = lastStatus.gps_fix || false;
-
-    if (!hasFix || sats < MISSION_MIN_SATS) {
-        const doorgaan = confirm(
-            `⚠️ GPS nog niet ideaal (fix: ${hasFix ? 'ja' : 'nee'}, ` +
-            `satellieten: ${sats}/${MISSION_MIN_SATS}).\n\n` +
-            `De missie kan geweigerd worden. Toch proberen te starten?`
-        );
-        if (!doorgaan) return;
-    }
-
+    const batt   = lastStatus.battery_percent;
     const hoogte = readTakeoffAltitude();
 
+    document.getElementById('mission-modal-alt').textContent = `${hoogte} m`;
+
+    const gpsEl = document.getElementById('mission-modal-gps');
+    gpsEl.textContent = hasFix ? `${sats} satellieten` : 'geen fix';
+    gpsEl.style.color = (hasFix && sats >= MISSION_MIN_SATS) ? '#4ade80' : '#f87171';
+
+    const battEl = document.getElementById('mission-modal-batt');
+    battEl.textContent = (batt === undefined || batt === null) ? '--' : `${batt}%`;
+    battEl.style.color = (batt !== undefined && batt !== null && batt < 40)
+        ? '#f87171' : '#e6e6e6';
+
+    // Waarschuwingen samenvoegen in één blok in plaats van meerdere dialogen.
+    const waarschuwingen = [];
+    if (!hasFix || sats < MISSION_MIN_SATS) {
+        waarschuwingen.push(
+            `GPS nog niet ideaal (fix: ${hasFix ? 'ja' : 'nee'}, ` +
+            `satellieten: ${sats}/${MISSION_MIN_SATS}). De missie kan geweigerd worden.`);
+    }
+    if (batt !== undefined && batt !== null && batt < 40) {
+        waarschuwingen.push(
+            `Batterij ${batt}%. Eén volledige zoekvlucht kost ruim vier minuten ` +
+            `en past precies op één lading.`);
+    }
+    const warnEl = document.getElementById('mission-modal-warning');
+    warnEl.innerHTML = waarschuwingen.map(w => `⚠️ ${w}`).join('<br><br>');
+    warnEl.style.display = waarschuwingen.length ? 'block' : 'none';
+
+    document.getElementById('mission-modal').classList.add('show');
+}
+
+
+/** Bevestigd: nu pas gaat het commando naar de Pi. */
+function confirmStartMission() {
+    window.hideModals();
+    const hoogte = readTakeoffAltitude();
     setMissionStatus(`🚀 Zoekvlucht starten (${hoogte} m)...`, '#f5a623');
     window.socket.emit('start_mission', { altitude: hoogte });
 }
@@ -185,6 +215,7 @@ function setMissionStatus(text, color) {
 
 // Expose op window
 window.startMission           = startMission;
+window.confirmStartMission    = confirmStartMission;
 window.missionStopHang        = missionStopHang;
 window.missionRTL             = missionRTL;
 window.missionLand            = missionLand;

@@ -370,6 +370,13 @@ def _run_approach(status, get_mav, emit_fn, hoogte):
         _set_state('guided', 'GUIDED-mode instellen...')
         emit_fn('meting_update', get_approach_state())
         mission._cmd_set_mode_guided(get_mav, mavutil)
+        # Wachten op bevestiging vóór de overname-detectie gaat gelden;
+        # zie mission._wacht_op_guided.
+        if not mission._wacht_op_guided(status):
+            _set_state('fout', 'GUIDED niet bevestigd door de vluchtcontroller — '
+                               'nadering afgebroken', active=False)
+            emit_fn('meting_update', get_approach_state())
+            return
         if not pattern._wacht(2, status):
             afbreken_door_piloot(); return
 
